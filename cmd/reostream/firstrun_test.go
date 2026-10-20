@@ -52,6 +52,9 @@ func TestStartupWithNoConfigSynthesizesAndServes(t *testing.T) {
 		if d.controlSrv != nil {
 			d.controlSrv.Close()
 		}
+		if d.rtspSrv != nil {
+			d.rtspSrv.Close()
+		}
 		d.httpSrv.Close()
 	})
 
@@ -227,6 +230,9 @@ func TestTheClaimMessageFollowsTheControlListenOverride(t *testing.T) {
 		d.cancelSup()
 		if d.controlSrv != nil {
 			d.controlSrv.Close()
+		}
+		if d.rtspSrv != nil {
+			d.rtspSrv.Close()
 		}
 		d.httpSrv.Close()
 	})

@@ -53,10 +53,9 @@ COPY --from=build --chown=nonroot:nonroot /out/data /data
 
 USER nonroot:nonroot
 # 8560 is the streaming port, unauthenticated, what a recorder points at.
-# 8562 is the control page, behind the claimed password. RTSP (default
-# 8554) is opt-in via the config's [rtsp] section and not exposed here;
-# publish it yourself if you turn it on, per docs/setup.md.
-EXPOSE 8560 8562
+# 8561 is RTSP, on by default, what go2rtc points at.
+# 8562 is the control page, behind the claimed password.
+EXPOSE 8560 8561 8562
 
 ENTRYPOINT ["/usr/local/bin/reostream"]
 # -data points at the data directory, not a config path that may not exist

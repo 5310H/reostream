@@ -46,6 +46,10 @@ const defaultListen = "0.0.0.0:8560"
 // page without a password.
 const defaultControlListen = "0.0.0.0:8562"
 
+// defaultRTSPListen is where a fresh install serves RTSP. Not 8554: that is
+// go2rtc's port, and go2rtc is the usual thing reading from here.
+const defaultRTSPListen = "0.0.0.0:8561"
+
 // firstRunLogInterval is how often main repeats the "not yet claimed"
 // message while the daemon is running on a synthesized config: loud enough
 // that it turns up in `docker logs` without anyone going looking for it.
@@ -192,6 +196,7 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 				Listen:          defaultControlListen,
 				AllowNoPassword: true,
 			},
+			RTSP: &config.RTSPConfig{Listen: defaultRTSPListen},
 		}
 		firstRun = true
 	} else {
@@ -221,9 +226,9 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 	srv := server.New(sup)
 	srv.SetSupervisor(sup)
 
-	// RTSP is constructed only when the config asks for it. With no [rtsp]
-	// section nothing here runs and every stream keeps a nil sink, which is
-	// what the HTTP output has always seen.
+	// RTSP is constructed only when the config asks for it, which a fresh
+	// install does. With no [rtsp] section nothing here runs and every
+	// stream keeps a nil sink, which is what the HTTP output has always seen.
 	// Raw frame feed at "/<name>.frames" on the streaming port, for the
 	// same streams listed under rtsp.
 	framesSrv := frames.New()

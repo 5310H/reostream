@@ -27,6 +27,7 @@ import (
 const (
 	claimDefaultListen        = "0.0.0.0:8560"
 	claimDefaultControlListen = "0.0.0.0:8562"
+	claimDefaultRTSPListen    = "0.0.0.0:8561"
 )
 
 // claimed reports whether this install has an owner, and brings the
@@ -329,7 +330,7 @@ func claimConfigText(password string) string {
 #
 # The listen addresses are the ones this daemon was already running on: an
 # install is only claimable while it has no config at all, which is exactly
-# when reostream falls back to these two defaults. -listen and
+# when reostream falls back to these defaults. -listen and
 # -control-listen on the command line still override them; if you pass
 # either, change the matching line below so the two agree.
 #
@@ -337,10 +338,13 @@ func claimConfigText(password string) string {
 
 listen = %q
 
+[rtsp]
+listen = %q
+
 [control]
 listen = %q
 password = %q
-`, claimDefaultListen, claimDefaultControlListen, password)
+`, claimDefaultListen, claimDefaultRTSPListen, claimDefaultControlListen, password)
 }
 
 // errAlreadyClaimed is the re-check inside the claim's lock finding that
