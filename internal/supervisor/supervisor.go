@@ -56,12 +56,15 @@ const (
 )
 
 // StreamStat reports one stream's current state for status endpoints.
+//
+// LastError is never cleared; LastErrorAt says when it happened.
 type StreamStat struct {
-	Camera    string
-	Stream    string
-	Running   bool
-	LastError string
-	Restarts  int
+	Camera      string
+	Stream      string
+	Running     bool
+	LastError   string
+	LastErrorAt time.Time
+	Restarts    int
 }
 
 // entry is everything one goroutine in runStream needs for the one stream
@@ -624,6 +627,7 @@ func (s *Supervisor) setResult(e *entry, err error) {
 	e.stat.Running = false
 	if err != nil {
 		e.stat.LastError = err.Error()
+		e.stat.LastErrorAt = time.Now()
 	}
 	s.mu.Unlock()
 }

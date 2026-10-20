@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/VoltTech21/reostream/internal/stream"
 	"github.com/VoltTech21/reostream/internal/supervisor"
@@ -66,6 +67,7 @@ type StreamStatus struct {
 	DroppedClients      int     `json:"dropped_clients"`
 	Restarts            int     `json:"restarts"`
 	LastError           string  `json:"last_error,omitempty"`
+	LastErrorAgeSeconds float64 `json:"last_error_age_seconds,omitempty"`
 	FPS                 float64 `json:"fps"`
 	BitrateBps          float64 `json:"bitrate_bps"`
 	LastFrameAgeSeconds float64 `json:"last_frame_age_seconds"`
@@ -122,6 +124,10 @@ func (s *Server) StreamStats() map[string]StreamStatus {
 			st.Connected = sup.Running
 			st.Restarts = sup.Restarts
 			st.LastError = sup.LastError
+			// Report when the last error happened.
+			if !sup.LastErrorAt.IsZero() {
+				st.LastErrorAgeSeconds = time.Since(sup.LastErrorAt).Seconds()
+			}
 		}
 		// A stream reads as Streaming only while it is both connected and
 		// recently delivering frames. stream.DefaultMediaTimeout is reused
