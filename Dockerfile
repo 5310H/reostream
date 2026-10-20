@@ -31,9 +31,12 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 
+ARG VERSION=
 ENV CGO_ENABLED=0
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/reostream ./cmd/reostream
+    go build -trimpath \
+    -ldflags="-s -w -X github.com/VoltTech21/reostream/internal/control.version=${VERSION}" \
+    -o /out/reostream ./cmd/reostream
 
 # An empty directory, built here and copied with --chown below, because the
 # distroless run stage has no shell and so no mkdir or chown of its own.

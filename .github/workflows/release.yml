@@ -84,6 +84,8 @@ jobs:
           # because a Pi is the other obvious place to run it, and the
           # binary is pure Go with no cgo, so it costs only build time.
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
 
   binaries:
     needs: test
@@ -108,7 +110,7 @@ jobs:
           # toolchain for the target and the result has no runtime deps.
           CGO_ENABLED: "0"
         run: |
-          go build -trimpath -ldflags "-s -w" \
+          go build -trimpath -ldflags "-s -w -X github.com/VoltTech21/reostream/internal/control.version=${{ github.ref_name }}" \
             -o reostream-linux-${{ matrix.goarch }} ./cmd/reostream
       - name: attach to the release
         # Only a real tag has a release to attach to; a manual run builds

@@ -23,10 +23,17 @@ func dict(kv ...any) (map[string]any, error) {
 	return m, nil
 }
 
+// version is set at build time with -ldflags -X, for builds that have no
+// VCS information to read, such as the Docker image.
+var version string
+
 // buildVersion is the rail's version chip: the module version when the
 // binary was built from a tag, else the short VCS revision, else "dev".
 // It is a template function rather than a field on every page struct.
 func buildVersion() string {
+	if version != "" {
+		return version
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "dev"
