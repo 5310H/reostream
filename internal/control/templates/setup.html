@@ -55,9 +55,9 @@ about half a minute.</p>
 <datalist id="rangelist">
 {{range .Ranges}}<option value="{{.}}">{{end}}
 </datalist>
-<p class="hint">A private range, no larger than a /24. If reostream is running in a
-container, what it detects is the container's own network rather than yours: the address
-of a camera you already have is the quickest way to know what to type here.</p>
+<p class="hint">A private range, no larger than a /24. The first guess is the network
+of the address you opened this page on. If your cameras are on a different network, type
+it here: the address of a camera you already have is the quickest way to know.</p>
 <button type="submit" class="quiet">Find cameras on this network</button>
 </form>
 <div id="discover-result"></div>

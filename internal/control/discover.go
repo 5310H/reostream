@@ -127,6 +127,31 @@ func localSweepRanges() []string {
 	return out
 }
 
+// sweepRangesFor is localSweepRanges with the /24 of the address the
+// browser used to reach this page put first, when that address is a
+// private IPv4. In a container the interfaces are the container's own
+// network, while the browser's address is the host's, where the cameras
+// almost always are.
+func sweepRangesFor(host string) []string {
+	local := localSweepRanges()
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host
+	}
+	ip, err := netip.ParseAddr(h)
+	if err != nil || !ip.Is4() || !ip.IsPrivate() {
+		return local
+	}
+	first := netip.PrefixFrom(ip, 24).Masked().String()
+	out := []string{first}
+	for _, r := range local {
+		if r != first {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // parseSweepRange turns an operator-supplied range into a prefix, or
 // refuses it.
 //
@@ -384,13 +409,14 @@ func (s *Server) serveDiscover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The range defaults to whatever this daemon's own interfaces suggest,
+	// The range defaults to the browser's network, else whatever this
+	// daemon's own interfaces suggest,
 	// so the ordinary case needs nothing typed; an operator on a network
 	// the daemon is not itself bound to can name one, and parseSweepRange
 	// is what keeps that from becoming a scanner for hire.
 	want := r.FormValue("range")
 	if want == "" {
-		ranges := localSweepRanges()
+		ranges := sweepRangesFor(r.Host)
 		if len(ranges) == 0 {
 			s.renderDiscover(w, DiscoverResult{Err: "this machine has no private IPv4 address, so there is no network to sweep. name a range instead."})
 			return

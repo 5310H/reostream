@@ -105,7 +105,7 @@ func (s *Server) serveSetup(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "setup.html", struct {
 		Title  string
 		Ranges []string
-	}{Title: "Setup", Ranges: localSweepRanges()})
+	}{Title: "Setup", Ranges: sweepRangesFor(r.Host)})
 }
 
 func (s *Server) serveURLs(w http.ResponseWriter, r *http.Request) {

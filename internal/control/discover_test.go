@@ -407,3 +407,25 @@ func TestHostsInDropsNetworkAndBroadcast(t *testing.T) {
 		t.Errorf("last host is %s, want 192.168.1.254", hosts[len(hosts)-1])
 	}
 }
+
+// In a container the interfaces are the container's own network. The
+// address the operator typed to reach this page is the host's, and the
+// cameras are almost always on that network, so it goes first.
+func TestTheAddressInTheBrowserIsOfferedFirst(t *testing.T) {
+	got := sweepRangesFor("192.168.1.50:8562")
+	if len(got) == 0 || got[0] != "192.168.1.0/24" {
+		t.Fatalf("ranges = %v, want 192.168.1.0/24 first", got)
+	}
+	for i, r := range got[1:] {
+		if r == got[0] {
+			t.Errorf("range %s offered twice (index %d)", r, i+1)
+		}
+	}
+	for _, host := range []string{"localhost:8562", "127.0.0.1:8562", "8.8.8.8:8562", "nvr.lan:8562", "[fd00::1]:8562"} {
+		for _, r := range sweepRangesFor(host) {
+			if strings.HasPrefix(r, "127.") || r == "8.8.8.0/24" {
+				t.Errorf("host %s offered %s", host, r)
+			}
+		}
+	}
+}
