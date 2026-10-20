@@ -1,11 +1,15 @@
 # reostream
 
-Pulls video from Reolink cameras over their native Baichuan protocol and serves it as
-RTSP and HTTP MPEG-TS. Built for Frigate; works with anything that plays a URL.
+A camera proxy for Reolink cameras. It sits between your cameras and Frigate (or any
+NVR), pulls video over Reolink's own Baichuan protocol, and serves it as RTSP and HTTP
+MPEG-TS.
+
+It does not replace Frigate. Frigate still does detection and recording; reostream only
+changes where Frigate gets the video from.
 
 ```
-camera --Baichuan(9000)--> reostream --RTSP--> go2rtc / Frigate / Blue Iris
-                                     --HTTP--> mpv / VLC / scripts
+Reolink cameras --Baichuan--> reostream --RTSP--> go2rtc / Frigate / Blue Iris
+                                        --HTTP--> mpv / VLC / scripts
 ```
 
 ## Why
