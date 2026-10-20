@@ -44,6 +44,8 @@ Your streams are at `rtsp://<host>:8561/<camera>` and `http://<host>:8560/<camer
 
 Prefer compose, a plain binary or systemd? See `docs/setup.md`.
 
+![Status page](docs/images/status.png)
+
 ## Using it with Frigate
 
 Feed go2rtc from reostream's RTSP, and point Frigate at go2rtc. One camera connection
@@ -123,7 +125,12 @@ Not yet tested:
 
 ## Camera control
 
-`reocam` reads and changes camera settings over the same protocol. Streaming does not
+The web page has a settings page for each camera: image, overlay, IR, status LED,
+floodlight, time and accounts.
+
+![Camera page](docs/images/camera.png)
+
+`reocam`, a separate command line tool, reads and changes camera settings over the same protocol. Streaming does not
 need it.
 
 ```
