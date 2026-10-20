@@ -149,3 +149,10 @@ func (s Support) HasFishEye(id int) bool {
 	ch, ok := s.Channel(id)
 	return ok && ch.FishEye != 0
 }
+
+// HasStitch reports whether channel id has two lenses whose seam GetStitch
+// and SetStitch adjust. In practice binoCfg and fishEye are never both set.
+func (s Support) HasStitch(id int) bool {
+	ch, ok := s.Channel(id)
+	return ok && ch.BinoCfg != 0
+}
