@@ -259,6 +259,85 @@ func (d *Depacketiser) Filler() int { return d.filler }
 // a small fraction of any real frame.
 const maxFramePrefix = 4096
 
+// prefixVerdict says how much the packet header could be trusted about where
+// its picture begins.
+type prefixVerdict int
+
+const (
+	prefixStated   prefixVerdict = iota // the header said, and it checks out
+	prefixNeedMore                      // too little buffered to tell yet
+	prefixUnusable                      // the header did not say usefully
+)
+
+// statedPrefix returns the metadata length declared at header offset 12.
+// It is counted from the end of the common 24-byte header, so an I frame's
+// extra fields are included (112 bytes of metadata declares 120).
+//
+// Searching for the first NAL misfires on P frames about 1 in 2000, since
+// metadata can look like a type-1 NAL header. The declared length matched
+// a start code in all 287 packets in testdata. It is still validated, and
+// the caller falls back to the search if it doesn't check out.
+//
+// settled means the packet is complete, so an unverifiable length is wrong.
+func statedPrefix(buf []byte, hdr int, codec string, settled bool) (int, prefixVerdict) {
+	const base = 24 // the header both packet kinds share
+	if len(buf) < base+4 {
+		return 0, prefixNeedMore
+	}
+	stated := int(binary.LittleEndian.Uint32(buf[12:]))
+	prefix := base + stated - hdr
+	if prefix < 0 || prefix > maxFramePrefix {
+		return 0, prefixUnusable
+	}
+	// A NAL header is 2 bytes for HEVC and 1 for H.264; take 2 either way
+	// so one length covers both and the check below cannot read past it.
+	if len(buf) < hdr+prefix+6 {
+		if settled {
+			return 0, prefixUnusable
+		}
+		return 0, prefixNeedMore
+	}
+	at := buf[hdr+prefix:]
+	if !(at[0] == 0 && at[1] == 0 && at[2] == 0 && at[3] == 1) {
+		return 0, prefixUnusable
+	}
+	switch codec {
+	case "H265", "h265":
+		if !hevcNALHeaderValid(at[4], at[5]) {
+			return 0, prefixUnusable
+		}
+	case "H264", "h264":
+		if !h264NALHeaderValid(at[4:]) {
+			return 0, prefixUnusable
+		}
+	}
+	return prefix, prefixStated
+}
+
+// searchPrefix finds the picture by looking for its first NAL, for packets
+// whose header does not declare where it starts.
+//
+// HEVC needs a NAL-header-aware search: these cameras put a proprietary
+// prefix before the picture that can contain a false 00 00 00 01, and
+// stopping there leaks a garbage reserved-type NAL into the frame and
+// truncates its tail.
+func searchPrefix(buf []byte, hdr int, codec string, kind FrameKind) int {
+	region := buf[hdr:min(hdr+maxFramePrefix, len(buf))]
+	var prefix int
+	switch codec {
+	case "H265", "h265":
+		prefix = hevcFirstNAL(region)
+	case "H264", "h264":
+		prefix = h264FirstNAL(region, kind == FrameIFrame)
+	default:
+		prefix = indexStartCode(region)
+	}
+	if prefix < 0 {
+		return 0
+	}
+	return prefix
+}
+
 func match(b, magic []byte) bool {
 	return len(b) >= 4 && b[0] == magic[0] && b[1] == magic[1] &&
 		b[2] == magic[2] && b[3] == magic[3]
@@ -301,22 +380,16 @@ func (d *Depacketiser) Next() (Frame, bool) {
 			// showed up as "error while decoding MB x 141..159" rather than
 			// as a stream that failed outright.
 			codec := string(trimNul(d.buf[4:8]))
-			region := d.buf[hdr:min(hdr+maxFramePrefix, len(d.buf))]
-			// HEVC needs a NAL-header-aware search: these cameras put a
-			// proprietary prefix before the picture that can contain a false
-			// 00 00 00 01, and stopping there leaks a garbage reserved-type
-			// NAL into the frame and truncates its tail.
-			var prefix int
-			switch codec {
-			case "H265", "h265":
-				prefix = hevcFirstNAL(region)
-			case "H264", "h264":
-				prefix = h264FirstNAL(region, kind == FrameIFrame)
-			default:
-				prefix = indexStartCode(region)
-			}
-			if prefix < 0 {
-				prefix = 0
+			// Prefer the declared prefix length. The search is the fallback,
+			// and also tells us whether the packet is complete so a bogus
+			// length can't make us wait forever.
+			search := searchPrefix(d.buf, hdr, codec, kind)
+			prefix, verdict := statedPrefix(d.buf, hdr, codec, len(d.buf) >= hdr+search+size)
+			switch verdict {
+			case prefixNeedMore:
+				return Frame{}, false
+			case prefixUnusable:
+				prefix = search
 			}
 			if len(d.buf) < hdr+prefix+size {
 				return Frame{}, false
