@@ -65,6 +65,18 @@ func New(listen string) *Server {
 // drop-on-full by design, but a reader falling behind is worth knowing,
 // so this counts them and says so once a minute per session.
 func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErrorCtx) {
+	// Log which reader is falling behind. The session can be nil here.
+	reader := "unknown reader"
+	if ctx.Session != nil {
+		if conns := ctx.Session.Conns(); len(conns) > 0 && conns[0] != nil {
+			if nc := conns[0].NetConn(); nc != nil {
+				if addr := nc.RemoteAddr(); addr != nil {
+					reader = addr.String()
+				}
+			}
+		}
+	}
+
 	s.mu.Lock()
 	// sessions maps a session to its stream; streams maps a path to the
 	// same stream. There are at most a couple of dozen paths, so the
@@ -78,13 +90,21 @@ func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErr
 			}
 		}
 	}
+	// Fall back to the session's own path.
+	if path == "?" && ctx.Session != nil {
+		if p := ctx.Session.Path(); p != "" {
+			path = p
+		}
+	}
 	if s.drops == nil {
 		s.drops = make(map[string]*dropCount)
 	}
-	d, ok := s.drops[path]
+	// Per reader, not just per path.
+	key := path + " " + reader
+	d, ok := s.drops[key]
 	if !ok {
 		d = &dropCount{}
-		s.drops[path] = d
+		s.drops[key] = d
 	}
 	d.n++
 	now := time.Now()
@@ -95,7 +115,7 @@ func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErr
 	s.mu.Unlock()
 
 	if say > 0 {
-		log.Printf("rtsp: %s: %d packets dropped, a reader is not keeping up", path, say)
+		log.Printf("rtsp: %s: %d packets dropped, reader %s is not keeping up", path, say, reader)
 	}
 }
 
