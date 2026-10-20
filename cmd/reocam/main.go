@@ -466,6 +466,7 @@ func fisheye(addr, user, pass string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	if len(args) == 0 {
 		f, err := c.GetFishEye(context.Background(), 0)
 		if err != nil {
@@ -474,6 +475,13 @@ func fisheye(addr, user, pass string, args []string) error {
 		fmt.Printf("imageType     %d  %s\n", int(f.ImageType), f.ImageType)
 		fmt.Printf("installType   %d\n", f.InstallType)
 		fmt.Printf("rotationAngle %d\n", f.RotationAngle)
+		// Also print the raw value and range the camera reports.
+		value, initial, rng, err := c.Get(context.Background(), "GetFishEye", 0)
+		if err == nil {
+			fmt.Printf("\nvalue   %s\n", value)
+			fmt.Printf("initial %s\n", initial)
+			fmt.Printf("range   %s\n", rng)
+		}
 		return nil
 	}
 	if len(args) != 2 || args[0] != "set" {
@@ -502,6 +510,7 @@ func stitch(addr, user, pass string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	cur, factory, lim, err := c.GetStitch(context.Background(), 0)
 	if err != nil {
 		return err
@@ -698,6 +707,7 @@ func floodlight(addr, user, pass string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 	value, _, rng, err := c.Get(context.Background(), "GetWhiteLed", 0)
 	if err != nil {
 		return err

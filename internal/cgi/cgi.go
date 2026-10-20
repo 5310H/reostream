@@ -111,6 +111,22 @@ func (c *Client) login(ctx context.Context) error {
 	return nil
 }
 
+// Close logs out. Cameras allow only a few CGI sessions and hold abandoned
+// ones for minutes, after which every login fails with "max session".
+// Safe to call on a nil or closed client.
+func (c *Client) Close() error {
+	if c == nil || c.token == "" {
+		return nil
+	}
+	// Don't use the caller's context; it's often already cancelled.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out []reply
+	err := c.do(ctx, "Logout", 0, nil, &out)
+	c.token = ""
+	return err
+}
+
 // call runs a command, and logs in again once if the camera says the session
 // is not valid. Retrying only that one code keeps a genuine refusal, such as
 // a command the model does not implement, reported as itself.

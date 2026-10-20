@@ -155,3 +155,53 @@ func TestGetHonoursContextCancellation(t *testing.T) {
 		t.Fatalf("Get took %v to return after a 50ms context deadline; the request was not actually cancelled", elapsed)
 	}
 }
+
+// Close must log out, or the camera runs out of sessions (rspCode -5).
+func TestCloseHandsTheSessionBack(t *testing.T) {
+	var logouts int32
+	var sawToken string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("cmd") {
+		case "Login":
+			w.Write([]byte(loginReply("tok1")))
+		case "Logout":
+			atomic.AddInt32(&logouts, 1)
+			sawToken = r.URL.Query().Get("token")
+			w.Write([]byte(`[{"cmd":"Logout","code":0,"value":{"rspCode":200}}]`))
+		default:
+			t.Errorf("unexpected cmd %q", r.URL.Query().Get("cmd"))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := Dial(strings.TrimPrefix(srv.URL, "http://"), "admin", "")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if logouts != 1 {
+		t.Errorf("logouts = %d, want 1", logouts)
+	}
+	if sawToken != "tok1" {
+		t.Errorf("Logout carried token %q, want the session's own tok1", sawToken)
+	}
+
+	// Closing twice must not log out twice: Close sits under an
+	// unconditional defer, and a second one would be a command against a
+	// session the camera has already dropped.
+	if err := c.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	if logouts != 1 {
+		t.Errorf("after a second Close, logouts = %d, want 1", logouts)
+	}
+
+	// And a nil client, so a defer placed before the error check is not a
+	// panic waiting to happen.
+	var nilClient *Client
+	if err := nilClient.Close(); err != nil {
+		t.Errorf("nil Close: %v", err)
+	}
+}
