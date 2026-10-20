@@ -1,10 +1,11 @@
 # reostream
 
 Pulls video from Reolink cameras over their native Baichuan protocol and serves it as
-MPEG-TS over HTTP. Built for Frigate; works with anything that plays a URL.
+RTSP and HTTP MPEG-TS. Built for Frigate; works with anything that plays a URL.
 
 ```
-camera --Baichuan(9000)--> reostream --HTTP MPEG-TS--> Frigate / mpv / VLC
+camera --Baichuan(9000)--> reostream --RTSP--> go2rtc / Frigate / Blue Iris
+                                     --HTTP--> mpv / VLC / scripts
 ```
 
 ## Why
@@ -28,7 +29,7 @@ January 2025. reostream is a new implementation, not a fork.
 ```
 docker run -d --name reostream --restart unless-stopped \
   -v reostream-data:/data \
-  -p 8560:8560 -p 8562:8562 \
+  -p 8560:8560 -p 8561:8561 -p 8562:8562 \
   ghcr.io/volttech21/reostream:latest
 
 docker logs reostream
@@ -39,38 +40,56 @@ docker logs reostream
 3. Add a camera: its IP, `admin`, and its password. Port 9000 on the camera must be
    reachable; it is on by default.
 
-Your stream is at `http://<host>:8560/<camera>.ts`.
+Your streams are at `rtsp://<host>:8561/<camera>` and `http://<host>:8560/<camera>.ts`.
 
 Prefer compose, a plain binary or systemd? See `docs/setup.md`.
 
 ## Using it with Frigate
 
+Feed go2rtc from reostream's RTSP, and point Frigate at go2rtc. One camera connection
+then serves detect, record and live view.
+
 ```yaml
+go2rtc:
+  streams:
+    driveway:
+      - rtsp://reostream:8561/driveway
+      - ffmpeg:driveway#audio=opus
+    driveway_sub:
+      - rtsp://reostream:8561/driveway_sub
+
 cameras:
   driveway:
     ffmpeg:
       inputs:
-        - path: http://reostream:8560/driveway_sub.ts
+        - path: rtsp://127.0.0.1:8554/driveway_sub
+          input_args: preset-rtsp-restream
           roles: [detect]
-        - path: http://reostream:8560/driveway.ts
+        - path: rtsp://127.0.0.1:8554/driveway
+          input_args: preset-rtsp-restream
           roles: [record, audio]
 ```
 
-No go2rtc entry is needed for detect or record. Keep go2rtc for Frigate's browser live
-view if your main stream is HEVC.
+The `#audio=opus` line is optional; it gives browsers and apps audio in live view.
+
+Without go2rtc, Frigate can read `http://reostream:8560/driveway.ts` directly.
 
 ## Endpoints
 
-| Endpoint | |
-|---|---|
-| `/<cam>.ts` | main stream |
-| `/<cam>_sub.ts` | sub stream |
-| `/<cam>_extern.ts` | extern: the middle stream (about 896x512 H.264) most clients never offer |
-| `/<cam>.keyframe` | latest keyframe, raw |
-| `/api/status` | per-stream JSON: connected, fps, bitrate, clients, reconnects |
-| `/metrics` | the same for Prometheus |
+| RTSP, port 8561 | HTTP, port 8560 | |
+|---|---|---|
+| `/<cam>` | `/<cam>.ts` | main stream |
+| `/<cam>_sub` | `/<cam>_sub.ts` | sub stream |
+| `/<cam>_extern` | `/<cam>_extern.ts` | extern: the middle stream (about 896x512 H.264) most clients never offer |
 
-RTSP output is available too, off by default. See `docs/setup.md`.
+Also on port 8560:
+
+| | |
+|---|---|
+| `/<cam>.keyframe` | latest keyframe, raw |
+| `/<cam>.frames` | raw access units with a small header, for your own decoder; see `docs/setup.md` |
+| `/api/status` | per-stream JSON: connected, fps, bitrate, clients, reconnects, last error |
+| `/metrics` | the same for Prometheus |
 
 ## What it does
 
@@ -86,16 +105,15 @@ No ffmpeg, GStreamer or RTSP server in the serving path.
 
 ## Tested on
 
-One fleet of eight wired cameras, four models, one firmware generation: 23 streams,
-69 Mbps, about 60% of one CPU core, 29-59 MB of memory. A 7 hour soak over all 23 streams
-had zero restarts and flat memory. Numbers in `docs/measurements.md`.
+One fleet of eight wired cameras, four models, one firmware generation. It has been the
+only video path for that fleet's Frigate since September: 23 streams, 69 Mbps, about 60%
+of one CPU core, 29-59 MB of memory. Numbers in `docs/measurements.md`.
 
 Not yet tested:
 
 - **Battery cameras.** They sleep and wake, and the protocol client has not seen them yet.
   Reports welcome.
 - Other people's cameras and firmware.
-- Multi-day uptime.
 
 ## Camera control
 
@@ -111,7 +129,7 @@ and writing settings and what to watch out for.
 
 ## More
 
-- `docs/setup.md`: other ways to run it, the config file, the control page, RTSP
+- `docs/setup.md`: other ways to run it, the config file, the control page, RTSP, the frames feed
 - `docs/control.md`: camera control with `reocam`
 - `docs/protocol.md`: what the Baichuan wire actually does
 - `docs/measurements.md`: how every number above was measured

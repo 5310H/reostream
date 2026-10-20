@@ -58,6 +58,9 @@ section is treated as unclaimed and sends you back to the claim screen.
 ```toml
 listen = "0.0.0.0:8560"
 
+[rtsp]
+listen = "0.0.0.0:8561"
+
 [control]
 listen = "0.0.0.0:8562"
 password = "$REOSTREAM_CONTROL_PASSWORD"
@@ -68,6 +71,7 @@ address = "192.0.2.50"
 username = "admin"
 password = "$REOSTREAM_DRIVEWAY_PASSWORD"
 streams = ["main", "sub"]
+rtsp = ["main", "sub"]
 ```
 
 - A value starting with `$` is read from that environment variable.
@@ -89,19 +93,31 @@ camera is shown as "accepted", not "confirmed", unless it was read back. See
 
 ## RTSP
 
-Off by default. For software that only takes an RTSP URL:
+On by default at port 8561 (not 8554, which go2rtc uses). A camera's `rtsp` list names
+which of its streams are served; cameras added from the page serve all of them. Remove
+the `[rtsp]` section to turn it off.
 
-```toml
-[rtsp]
-listen = "0.0.0.0:8554"
+Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`. TCP interleaved is the
+default; UDP is offered, but a lost packet is a corrupt frame.
 
-[[camera]]
-name = "driveway"
-streams = ["main", "sub"]
-rtsp = ["main"]
-```
+## Frames feed
 
-Serves `rtsp://host:8554/<cam>`, `<cam>_sub` and `<cam>_extern`. TCP interleaved is the
-default; UDP is offered but a lost packet is a corrupt frame. Prefer HTTP where you can:
-it reconnects with one request, while RTSP sessions can be left half open by a network
-blip. Remember to publish port 8554 from the container.
+`/<cam>.frames` on port 8560 streams one record per access unit, for clients that feed a
+hardware decoder directly. Each record is a 20 byte big-endian header, then the payload
+(Annex B video with parameter sets inline, or AAC):
+
+| offset | type | field |
+|---|---|---|
+| 0 | 2 bytes | magic `RF` |
+| 2 | u8 | version, 1 |
+| 3 | u8 | kind: 1 keyframe, 2 inter frame, 3 AAC |
+| 4 | u8 | codec: 1 H.264, 2 HEVC, 3 AAC |
+| 5 | u8 | reserved |
+| 6 | u16 | width, 0 until known |
+| 8 | u16 | height, 0 until known |
+| 10 | u32 | camera time in microseconds (wraps every 71.6 minutes) |
+| 14 | u32 | payload length |
+| 18 | u16 | server send time, epoch milliseconds mod 65536 |
+
+A subscriber starts at a keyframe and skips to the next one if it falls behind. Served
+for the streams in the camera's `rtsp` list.
