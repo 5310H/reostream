@@ -4,8 +4,8 @@
 # into either stage. A fresh install has neither: the config is written by
 # the control page itself, into the data directory mounted at run time, once
 # an operator claims the install with the one-time token the daemon prints
-# to its own log at startup. See docker-compose.yml and the README's
-# Configuration section.
+# to its own log at startup. See docker-compose.yml and
+# docs/setup.md.
 # --platform=$BUILDPLATFORM pins the build stage to the machine doing the
 # building, and GOARCH below cross-compiles from there. Without it, building
 # an arm64 image on an amd64 runner drags the whole Go toolchain through QEMU
@@ -55,7 +55,7 @@ USER nonroot:nonroot
 # 8560 is the streaming port, unauthenticated, what a recorder points at.
 # 8562 is the control page, behind the claimed password. RTSP (default
 # 8554) is opt-in via the config's [rtsp] section and not exposed here;
-# publish it yourself if you turn it on, per the README's RTSP section.
+# publish it yourself if you turn it on, per docs/setup.md.
 EXPOSE 8560 8562
 
 ENTRYPOINT ["/usr/local/bin/reostream"]

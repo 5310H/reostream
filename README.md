@@ -1,16 +1,32 @@
 # reostream
 
-A bridge that pulls video from Reolink cameras over their native Baichuan protocol and
-serves it as MPEG-TS over HTTP.
+Pulls video from Reolink cameras over their native Baichuan protocol and serves it as
+MPEG-TS over HTTP. Built for Frigate; works with anything that plays a URL.
 
 ```
 camera --Baichuan(9000)--> reostream --HTTP MPEG-TS--> Frigate / mpv / VLC
 ```
 
+## Why
+
+Reolink's RTSP server is broken on some models. On a Duo 3 it gave green blocks, grey
+frames and smearing. Same camera, same encoder, same thirty minutes, both transports:
+
+| transport | segments | segments with bitstream errors |
+|---|---|---|
+| Baichuan | 184 | 0 |
+| RTSP | 178 | 147 |
+
+Reolink's own NVR looks fine because it uses Baichuan, not RTSP. A fisheye here also loses
+about 21% of its frames over RTSP. Method in `docs/measurements.md`.
+
+Neolink did this first and made the protocol understandable. It has had no commits since
+January 2025. reostream is a new implementation, not a fork.
+
 ## Quickstart
 
 ```
-docker run -d --name reostream \
+docker run -d --name reostream --restart unless-stopped \
   -v reostream-data:/data \
   -p 8560:8560 -p 8562:8562 \
   ghcr.io/volttech21/reostream:latest
@@ -18,161 +34,16 @@ docker run -d --name reostream \
 docker logs reostream
 ```
 
-The log prints a one-time token. Open `http://<this-host>:8562/claim`, paste it,
-take the password it offers you, and add a camera. That is the whole setup; there
-is no config file to write first and no password to choose in advance.
+1. The log prints a one-time token. Open `http://<host>:8562/claim` and paste it.
+2. Keep the password it gives you.
+3. Add a camera: its IP, `admin`, and its password. Port 9000 on the camera must be
+   reachable; it is on by default.
 
-Point your recorder at `http://<this-host>:8560/<camera>.ts`.
+Your stream is at `http://<host>:8560/<camera>.ts`.
 
-No Docker? Every release also carries a plain static binary; see Deployment.
-
-If you want to read why any of this exists before running it, carry on below.
-Configuration has the same four steps in more detail.
-
-## Why
-
-Reolink cameras have an RTSP server, and on some models it does not work properly. On a
-Duo 3 here it produced green blocks, flat grey frames and purple smearing. Capturing both
-transports from the same camera for thirty minutes and comparing identical wall-clock
-seconds showed the problem is the RTSP server itself, not the encoder:
-
-| transport | segments | segments with bitstream errors |
-|---|---|---|
-| Baichuan | 184 | 0 |
-| RTSP | 178 | 147 |
-
-Same camera, same encoder, same second. That is also why the manufacturer's own NVR looks
-fine: it uses Baichuan and never touches the RTSP server.
-
-Method and the rest of the measurements are in docs/measurements.md.
-
-Reolink's battery cameras have no RTSP at all, so Baichuan is the only way to get video
-off them, and a fisheye model here loses about 21% of its frames over RTSP.
-
-Neolink solved this first and deserves the credit for making the protocol legible. It has
-not had a commit since January 2025 and has 124 open issues, including a memory leak
-reported since 2022. reostream is a fresh implementation, not a fork.
-
-## What it does
-
-- One long-lived connection per stream, held whether or not anyone is watching.
-- Real presentation timestamps taken from the camera's own clock. An elementary stream
-  carries no timing of its own, so anything that muxes it without this invents timestamps
-  and produces wrong frame rates.
-- Broadcast fan-out. A client that stops reading is disconnected, never buffered. No
-  client can slow down or wedge a camera.
-- New clients join at the next keyframe, after being handed the cached PAT and PMT.
-- Audio muxed onto its own stream where the camera provides AAC.
-- Clean session shutdown, which matters: a camera whose session is not released refuses
-  new connections for several minutes.
-
-There is deliberately no RTSP server, no GStreamer, no session pool and no ffmpeg in the
-serving path. Every bug worth avoiding here lived in one of those.
-
-## Streams
-
-Reolink cameras carry three streams. `extern` is the middle one, typically 896x512,
-which is useful when the main stream is 4K and the substream is too small to be worth
-looking at. Most third-party clients only offer main and sub.
-
-| Endpoint | Stream |
-|---|---|
-| `GET /<cam>.ts` | main |
-| `GET /<cam>_sub.ts` | sub |
-| `GET /<cam>_extern.ts` | extern |
-| `GET /<cam>.keyframe` | most recent keyframe, raw elementary stream, no decode in the serving path |
-| `GET /api/status` | per-camera JSON: connected, fps, bitrate, keyframe age, clients, reconnects |
-| `GET /metrics` | the same in Prometheus format |
-
-## RTSP
-
-RTSP is served alongside HTTP, not instead of it, for software that takes an
-RTSP URL and nothing else.
-
-    [rtsp]
-    listen = "0.0.0.0:8554"
-
-    [[camera]]
-    name = "driveway"
-    streams = ["main", "sub"]
-    rtsp = ["main"]
-
-| Endpoint | Stream |
-|---|---|
-| `rtsp://host:8554/<cam>` | main |
-| `rtsp://host:8554/<cam>_sub` | sub |
-| `rtsp://host:8554/<cam>_extern` | extern |
-
-Absent the `[rtsp]` section nothing is served and every stream keeps the same
-path it has always had.
-
-TCP interleaved is the default transport. UDP is offered for clients that
-insist, and is not preferred: a lost RTP packet is a corrupt frame with no
-retransmit, which is worse than the larger header interleaving costs.
-
-**RTSP is not an upgrade to the HTTP output.** HTTP is stateless, one long
-lived GET, and MPEG-TS resynchronises itself, so a client that loses the
-connection reconnects with a single request. RTSP carries session state that
-a network blip can leave half open, and reconnecting costs a full handshake.
-What RTSP is better at is telling a client that a stream has died, through
-RTCP and keepalives, where a stalled TS stream looks alive until the
-consumer's own timeout fires. Running both keeps both properties.
-
-`extern` is `externStream` on the wire, 896x512 H.264 at roughly 1 Mbps. It is not
-documented by Reolink and Neolink never implemented it. It sits between the 4K main
-stream and the sub thumbnail, and being H.264 not HEVC it avoids the browser
-codec problem that main runs into. See docs/measurements.md for the four-camera
-measurement.
-
-## Configuration
-
-There is nothing to write by hand before the first run. A fresh install starts with no
-config file at all:
-
-1. Start the container against an empty data directory (`docker compose up`, or `docker
-   run` with `-v data:/data`). It comes up serving no cameras and prints a one-time claim
-   token to its own log.
-2. Read the token with `docker logs` (or `docker compose logs`). It looks like
-   `XXXX-XXXX-XXXX-XXXX`, and the log line names the URL to open. The token lives in
-   memory only: restarting the container before it is claimed prints a new one and the
-   old one stops working.
-3. Open that URL and enter the token. The password field arrives already filled in with
-   a password generated for that render, 16 characters of `crypto/rand` from a
-   31-character alphabet, 79.3 bits. Accepting it as it stands is the recommended
-   answer: it is the only thing that makes the password strong by construction, and
-   nothing on this page is rate limited. A password you type instead must be at least 16
-   characters. Either way, submitting writes `/data/config.toml` inside the container and
-   the page starts requiring that password from then on.
-4. Add a camera from the page, or by editing the config directly, either by hand on the
-   mounted data volume or through the page's own editor.
-
-   If you edit by hand, **add** the `[[camera]]` block to the file that is already
-   there; do not replace the file with this fragment. A config with no `[control]`
-   section is treated as not yet claimed. That is deliberate, and it is what stops a
-   half-written file leaving the page open to anyone, but it means overwriting your
-   config with the block below would send you back to the claim screen with no way in
-   except editing the file again.
-
-```toml
-listen = "0.0.0.0:8560"
-
-# ... your existing [control] section stays exactly as it is ...
-
-[[camera]]
-name = "driveway"
-address = "192.0.2.50"
-username = "admin"
-password = "$REOSTREAM_DRIVEWAY_PASSWORD"
-streams = ["main", "sub"]
-```
-
-A `password` beginning with `$` is read from that environment variable. Unknown keys are
-an error at startup, not a warning, so a typo fails at boot instead of serving 404s
-at three in the morning.
+Prefer compose, a plain binary or systemd? See `docs/setup.md`.
 
 ## Using it with Frigate
-
-Point Frigate at the HTTP endpoint. No go2rtc entry is needed for detect or record.
 
 ```yaml
 cameras:
@@ -185,218 +56,69 @@ cameras:
           roles: [record, audio]
 ```
 
-go2rtc is still worth keeping for Frigate's browser live view, because that needs MSE or
-WebRTC and browsers cannot play HEVC over WebRTC. Detect and record do not go through it.
+No go2rtc entry is needed for detect or record. Keep go2rtc for Frigate's browser live
+view if your main stream is HEVC.
 
-## Status
+## Endpoints
 
-The daemon runs from a TOML config file, one `[[camera]]` block per camera, with
-`$ENVVAR` password references and unknown keys rejected at startup instead of ignored.
-Each stream is one supervised goroutine: backoff starts at 1s, doubles up to a 15s
-ceiling, and resets once a connection has stayed up for more than a minute, so a flaky
-camera does not carry a long backoff into an unrelated later failure. A restart never
-overlaps the connection it is replacing. Audio is carried on its own PID with the same
-clock as video. A slow client is disconnected, never buffered; verified against a
-live camera on a 280 kbps stream, dropped at about 65 seconds with memory flat
-throughout.
+| Endpoint | |
+|---|---|
+| `/<cam>.ts` | main stream |
+| `/<cam>_sub.ts` | sub stream |
+| `/<cam>_extern.ts` | extern: the middle stream (about 896x512 H.264) most clients never offer |
+| `/<cam>.keyframe` | latest keyframe, raw |
+| `/api/status` | per-stream JSON: connected, fps, bitrate, clients, reconnects |
+| `/metrics` | the same for Prometheus |
 
-Measured against a live 8 camera fleet carrying every stream those cameras have: 23
-streams, 69 Mbps, about 60% of one CPU core, 29-59 MB resident. A live 4K HEVC main
-stream gave 1498 frames in 60.04 seconds, 24.95 fps against a 25 fps camera, zero decode
-errors. See docs/measurements.md for the full numbers.
+RTSP output is available too, off by default. See `docs/setup.md`.
 
-A 7 hour soak over all 23 streams held 23/23 connected with zero restarts, zero dropped
-clients and zero dropped audio frames, and resident memory oscillated inside a 29-59 MB
-band instead of climbing. The band matters more than its width: an unbounded buffer is
-the failure this project exists to avoid.
+## What it does
 
-Not yet done, and worth being direct about:
+- One connection per stream, held open whether anyone is watching or not.
+- Timestamps from the camera's own clock, so frame rates come out right.
+- A slow client is disconnected, never buffered. No client can stall a camera.
+- New clients start at a keyframe. Audio is carried when the camera sends it.
+- Sessions are closed cleanly. A camera left with an open session refuses connections
+  for minutes.
+- A web page on port 8562 for status, live view, config, logs and camera settings.
 
-- Seven hours is not seven weeks. No multi-day soak has completed.
-- Tested against one fleet: four camera models, one firmware generation. Nobody else's
-  cameras have been tried.
-- **Battery cameras have never been tested.** This is the biggest gap on this list.
-  Battery models are the main reason most people reached for Neolink in the first
-  place, since they have no RTSP server at all, and they behave differently from wired
-  cameras: they sleep, wake on motion, and send battery-state messages the protocol
-  client has never seen.
-- Container images are built and pushed only when a release is tagged, so a commit on
-  main can be ahead of `:latest`. See Deployment below for building your own.
+No ffmpeg, GStreamer or RTSP server in the serving path.
 
-See `docs/design/` for the design and `docs/protocol.md` for what the wire actually
-does, which differs from the published documentation in several places.
+## Tested on
 
-## Control
+One fleet of eight wired cameras, four models, one firmware generation: 23 streams,
+69 Mbps, about 60% of one CPU core, 29-59 MB of memory. A 7 hour soak over all 23 streams
+had zero restarts and flat memory. Numbers in `docs/measurements.md`.
 
-An `[control]` section turns on a web page for the three things that otherwise need a
-text editor, `curl` and `docker logs`: watching stream status, editing the config, and
-reading logs.
+Not yet tested:
 
-```toml
-[control]
-listen = "0.0.0.0:8562"
-password = "$REOSTREAM_CONTROL_PASSWORD"
-```
-
-Absent the section this daemon starts no control listener of its own. That is not the
-same as "nothing changes": a container image started with no config at all serves the
-page anyway, on 0.0.0.0:8562, so there is somewhere to claim the install from; see
-Configuration above. While a config file exists but names no `[control]` password the
-page stays behind its claim screen and serves nothing else, so an old config carried
-over from before this feature is closed, not open. Write a `[control]` section
-with a password into it and the running daemon picks that up on its next request, with
-no restart.
-
-`password` follows the same rule as a camera password: a value beginning with `$` is
-read from that environment variable. `listen` with no password refuses to boot unless
-`allow_no_password = true` is set explicitly.
-
-Control runs on its own listener, separate from the streaming port. The streaming port
-stays open and unauthenticated, which is what a recorder needs; the control port carries
-the only credential in this daemon, so a firewall rule that opens streaming to a recorder
-never has to also decide whether that recorder should be able to change the config.
-
-The page shows one row per stream translated from `/api/status` into a state
-(streaming, no video, reconnecting, down) instead of raw booleans, plays each stream's
-video live in the browser, edits the config with the same parser the daemon boots with
-so an invalid save is rejected before it is written, and tails the daemon's own logs.
-
-It also controls the cameras themselves, which is the other half of what it is for.
-Each camera has its own page: what the camera says it is and what this login may do on
-it, what every read this daemon knows answers, a curated set of settings that can
-actually be changed, the floodlight, its NTP server and timezone, and an advanced view
-of every readable block with the raw write behind it. Nothing there is presented as more
-certain than it is: each writable pair carries a confidence, one of proven, unverified, known
-inert or unsafe to rewrite, taken from what was actually observed on a camera and not
-from a 200, and a write that answers 200 is reported as "accepted" and not as "confirmed"
-unless it was read back. NTP and timezone can be applied to the whole fleet at once,
-per-camera result by per-camera result. See docs/control.md.
-Saving diffs the old config against the new and reloads only what changed: an unchanged
-stream is never stopped, and a changed camera is stopped to completion before it is
-started again, so its session is released before the same camera is asked to reconnect.
-Verified on a live 8 camera fleet; see docs/measurements.md.
-
-Two things about deploying it matter more than they look:
-
-- **The container runs as a non-root user (uid 65532).** If the data directory is owned
-  by root, or not writable by that user, the very first save fails: with no config yet,
-  that first save is the claim itself. The image creates `/data` owned by that user, and
-  a named volume (the pattern in docker-compose.yml) inherits that ownership on first
-  use; a bind mount to a host directory needs to be writable by uid 65532 yourself, for
-  example `chown -R 65532:65532` on that directory before the first run.
-- **Mount the data directory, not a single config file.** A single-file bind mount
-  (`./config.toml:/data/config.toml`) leaves the directory around it not writable from
-  inside the container, so no temp file can be created beside it and the atomic rename
-  this daemon otherwise uses is unavailable. Mounting the whole directory (`./data:/data`,
-  or the named volume in docker-compose.yml) restores atomic replacement and keeps the
-  backup durably next to the config across restarts.
+- **Battery cameras.** They sleep and wake, and the protocol client has not seen them yet.
+  Reports welcome.
+- Other people's cameras and firmware.
+- Multi-day uptime.
 
 ## Camera control
 
-`reocam` is a second binary in this repository that reads and changes camera settings.
-Streaming does not need it and does not use it.
-
-Start here, on any camera:
+`reocam` reads and changes camera settings over the same protocol. Streaming does not
+need it.
 
 ```
 reocam -address 192.0.2.50 -password secret probe
 ```
 
-`probe` sends every read this tool knows and reports what the camera answered, because
-no table can say what a given model implements. A message a camera does not have comes
-back 405 instead of failing the connection, so asking is safe and is the only honest
-way to find out.
+`probe` reports which messages the camera answers. See `docs/control.md` for reading
+and writing settings and what to watch out for.
 
-Across three models here, a fixed 8 MP bullet, a fisheye and a dual lens pano, 89 of 103
-messages answer identically. The 14 that differ are the ones you would expect: fisheye
-and stitching messages on the models that have those lenses, the smart detection suite on
-the newest one. `docs/control.md` has the matrix.
+## More
 
-```
-reocam -address ... get all          # sweep every readable block
-reocam -address ... get md           # one block, as XML
-reocam -address ... set 45 < md.xml  # write a block back
-reocam -address ... floodlight motion
-```
+- `docs/setup.md`: other ways to run it, the config file, the control page, RTSP
+- `docs/control.md`: camera control with `reocam`
+- `docs/protocol.md`: what the Baichuan wire actually does
+- `docs/measurements.md`: how every number above was measured
 
-The message ids come from a dispatch table inside Reolink's own firmware, recovered
-statically, not from a packet capture: 246 ids with the names the firmware gives
-them, in `docs/msgids.json`. Eight of them are confirmed against live cameras, which is
-what makes the rest credible. The table is explicitly not exhaustive, and a camera
-dispatches with a switch and not a table, so ids it accepts that no NVR sends will
-not appear.
-
-**Never write a document this tool invented.** The only correct body for a write is what
-the matching read returned with one field changed. The camera supplies its own schema
-that way, including fields no camera here has, and echoing its document back preserves
-the exact byte formatting some messages insist on. There are 54 read/write pairs.
-
-Three things will mislead you:
-
-- **421 means the message was built wrong, not that the model lacks it.** A
-  configuration write is a two section message, the channel in an extension and the
-  document in a second section. Sent as one section a camera answers 421 and changes
-  nothing.
-- **A reply status is not proof.** Message 288 accepts a floodlight command, answers
-  200, and does nothing observable. Two way audio "worked" twice before it made a sound.
-  Verify the effect, not the call.
-- **Some settings are HTTP only on this firmware.** The floodlight, the fisheye view
-  modes and the dual lens stitch parameters all go over the camera's CGI API, not
-  Baichuan.
-
-`reocam verify -write` writes each document straight back unchanged, which exercises the
-write path without altering the camera. All 20 applicable pairs on one wired camera
-returned 200 with the document unchanged.
-
-Acceptance is not effect, though, and they come apart per message: OSD, LED and email
-config all take a changed field and read it back. `md set` and `floodlight set` answer 200
-and change nothing, `md set` on both models tried. Three writes are proven to work, two
-are proven inert, and fifty are untested. See `docs/control.md`.
-
-`docs/control.md` has the rest: how the id table was recovered, how to recover more, and
-the worked examples.
-
-## Deployment
-
-A multi-stage `Dockerfile` builds a static binary and runs it from a minimal base image
-as a non-root user; see `docker-compose.yml` for an example that mounts a data directory
-and publishes the streaming and control ports. Nothing is baked into the image: a fresh
-install has no config and no password until it is claimed through the control page, per
-the Configuration section above.
-
-If you would rather not run a container, every tagged release also carries plain
-binaries for linux/amd64 and linux/arm64. Download the one for your machine, put it
-somewhere on the path, and run it:
-
-```
-curl -fsSL -o reostream \
-  https://github.com/VoltTech21/reostream/releases/latest/download/reostream-linux-amd64
-chmod +x reostream
-./reostream -data ./reostream-data
-```
-
-It prints the same claim token the container does. There is no config file to write
-first, and nothing to install alongside it: the binary is static and has no runtime
-dependencies.
-
-To build it yourself instead, you need Go 1.26 and nothing else:
-
-```
-git clone https://github.com/VoltTech21/reostream
-cd reostream
-go build ./cmd/reostream
-```
-
-For a plain Linux host, `contrib/reostream.service` is a systemd unit. It claims the
-same way the container does: it passes `-data /var/lib/reostream`, systemd creates that
-directory for it, and the config appears there when the install is claimed. Read the
-comment on `KillSignal` and `TimeoutStopSec` before changing either: a shutdown that does not
-give the daemon time to send its stream-stop messages leaves every camera in the fleet
-refusing new connections for minutes.
-
-## Licence
+## License
 
 AGPL v3. Free to use, run and modify. If you distribute a modified version or run one as a
-service for other people, your changes have to be published too.
+service for others, you must publish your changes.
 
-A commercial licence without that obligation is available. See `COPYRIGHT`.
+A commercial license without that obligation is available. See `COPYRIGHT`.

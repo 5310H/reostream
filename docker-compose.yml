@@ -2,7 +2,7 @@
 # beforehand: a fresh install has no config file. Bring the container up,
 # then read the claim token from `docker compose logs` and use it at
 # http://<host>:8562/ to set a password and write /data/config.toml. See
-# the README's Configuration section.
+# the docs/setup.md.
 #
 # GET /api/status is used as the health check, deliberately not a stream
 # endpoint: probing a stream costs a client slot and a keyframe wait, which
