@@ -20,8 +20,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VoltTech21/reostream/internal/baichuan"
 	"github.com/VoltTech21/reostream/internal/config"
 	"github.com/VoltTech21/reostream/internal/control"
+	"github.com/VoltTech21/reostream/internal/frames"
 	"github.com/VoltTech21/reostream/internal/rtsp"
 	"github.com/VoltTech21/reostream/internal/server"
 	"github.com/VoltTech21/reostream/internal/stream"
@@ -222,12 +224,22 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 	// RTSP is constructed only when the config asks for it. With no [rtsp]
 	// section nothing here runs and every stream keeps a nil sink, which is
 	// what the HTTP output has always seen.
+	// Raw frame feed at "/<name>.frames" on the streaming port, for the
+	// same streams listed under rtsp.
+	framesSrv := frames.New()
 	var rtspSrv *rtsp.Server
 	if cfg.RTSP != nil {
 		rtspSrv = rtsp.New(cfg.RTSP.Listen)
-		sup.AttachSinks(func(camera, st string) stream.FrameSink {
-			return rtspSrv.Add(rtsp.Path(camera, st))
-		})
+	}
+	sup.AttachSinks(func(camera, st string) stream.FrameSink {
+		path := rtsp.Path(camera, st)
+		fs := framesSrv.Add(path)
+		if rtspSrv == nil {
+			return fs
+		}
+		return multiSink{rtspSrv.Add(path), fs}
+	})
+	if rtspSrv != nil {
 		if err := rtspSrv.Start(); err != nil {
 			cancelSup()
 			return nil, err
@@ -311,7 +323,14 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 		go firstRunLoop(supCtx, configPath, msg)
 	}
 
-	httpSrv := &http.Server{Addr: listen, Handler: srv.Handler()}
+	streamHandler := srv.Handler()
+	httpSrv := &http.Server{Addr: listen, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if frames.Handles(r) {
+			framesSrv.ServeHTTP(w, r)
+			return
+		}
+		streamHandler.ServeHTTP(w, r)
+	})}
 
 	runDone := make(chan error, 1)
 	go func() {
@@ -512,4 +531,20 @@ func resolveConfigPath(dataDir, override string) string {
 		return override
 	}
 	return filepath.Join(dataDir, "config.toml")
+}
+
+// multiSink fans one stream's frames, and its connection events, to several
+// sinks. Each must obey the FrameSink contract of not blocking.
+type multiSink []stream.ConnectionSink
+
+func (m multiSink) Frame(f baichuan.Frame) {
+	for _, s := range m {
+		s.Frame(f)
+	}
+}
+
+func (m multiSink) Connected() {
+	for _, s := range m {
+		s.Connected()
+	}
 }
