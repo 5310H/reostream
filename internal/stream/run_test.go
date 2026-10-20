@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -104,7 +105,24 @@ func TestRunAgainstAFakeCamera(t *testing.T) {
 }
 
 func TestRunSetsHeaderBeforeStartingToPublish(t *testing.T) {
-	cam := fakecam.New(t, h265Fixture(t))
+	// Paced, not one write: sent in a burst, a slow machine can deliver the
+	// whole fixture before the late subscriber below exists.
+	fixture := h265Fixture(t)
+	cam := fakecam.NewWriter(t, func(conn net.Conn, clientGone <-chan struct{}) {
+		const chunk = 32 << 10
+		for off := 0; off < len(fixture); off += chunk {
+			end := min(off+chunk, len(fixture))
+			if _, err := conn.Write(fixture[off:end]); err != nil {
+				return
+			}
+			select {
+			case <-clientGone:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		<-clientGone
+	})
 	h := hub.New(64)
 
 	ctx, cancel := context.WithCancel(context.Background())
