@@ -75,6 +75,12 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		Streams:  form["streams"],
 		RTSP:     form["rtsp"],
 	}
+	// The page has no RTSP field. With RTSP on, serve every stream the
+	// camera pulls; reading the missing field as "none" dropped the
+	// camera from RTSP on every edit.
+	if _, ok := form["rtsp"]; !ok && cfg.RTSP != nil {
+		cam.RTSP = append([]string(nil), cam.Streams...)
+	}
 
 	for i, existing := range cfg.Cameras {
 		if existing.Name != cam.Name {

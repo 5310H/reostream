@@ -145,3 +145,44 @@ func TestFormRejectsAStreamTheDaemonDoesNotKnow(t *testing.T) {
 		t.Fatal("an unknown stream name was accepted")
 	}
 }
+
+// The form has no RTSP field, so an edit must not be read as "serve
+// nothing over RTSP": that silently cut a camera off from go2rtc.
+func TestFormEditKeepsRTSP(t *testing.T) {
+	cfg := &config.Config{
+		RTSP: &config.RTSPConfig{Listen: "0.0.0.0:8561"},
+		Cameras: []config.Camera{
+			{Name: "a", Address: "1.1.1.1", Streams: []string{"main", "sub"}, RTSP: []string{"main", "sub"}},
+		},
+	}
+	form := url.Values{
+		"name":     {"a"},
+		"address":  {"1.1.1.2"},
+		"username": {""},
+		"password": {passwordUnchanged},
+		"streams":  {"main", "sub", "extern"},
+	}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.Cameras[0].RTSP, ","); got != "main,sub,extern" {
+		t.Fatalf("rtsp = %q, want every stream", got)
+	}
+}
+
+func TestFormAddServesRTSPWhenItIsOn(t *testing.T) {
+	cfg := &config.Config{RTSP: &config.RTSPConfig{Listen: "0.0.0.0:8561"}}
+	form := url.Values{
+		"name":     {"new"},
+		"address":  {"192.0.2.9"},
+		"username": {"admin"},
+		"password": {""},
+		"streams":  {"main", "sub"},
+	}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.Cameras[0].RTSP, ","); got != "main,sub" {
+		t.Fatalf("rtsp = %q", got)
+	}
+}
