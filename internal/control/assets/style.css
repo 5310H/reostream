@@ -447,6 +447,9 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
 }
 
 .cam-video img, .cam-video video { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* display: block above would otherwise beat the hidden attribute, and the
+   idle player pushes the still aside. */
+.cam-video [hidden] { display: none; }
 
 .cam-video .play-btn {
   position: absolute;
