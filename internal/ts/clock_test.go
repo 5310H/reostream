@@ -1,6 +1,9 @@
 package ts
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestClockRebasesToZero(t *testing.T) {
 	// The camera's clock starts wherever it likes. The first frame must map to
@@ -80,5 +83,54 @@ func TestClockHandlesRepeatedWraps(t *testing.T) {
 	}
 	if last == 0 {
 		t.Fatal("PTS did not advance across repeated wraps")
+	}
+}
+
+func TestClockResumesAfterTheCameraRestarts(t *testing.T) {
+	// After a reboot the camera clock restarts near zero. PTS should carry
+	// on from the last value plus the outage.
+	c := NewClock()
+	c.PTS(200_000_000)
+	last := c.PTS(260_000_000) // 60s streamed: 5,400,000 ticks
+	if last != 5_400_000 {
+		t.Fatalf("PTS before restart = %d, want 5400000", last)
+	}
+
+	c.Resume(15 * time.Second)
+	if got := c.PTS(20_000_000); got != last+15*90000 {
+		t.Fatalf("first PTS after restart = %d, want %d (last + 15s)", got, last+15*90000)
+	}
+	if got := c.PTS(20_040_000); got != last+15*90000+3600 {
+		t.Fatalf("40ms after restart PTS = %d, want %d", got, last+15*90000+3600)
+	}
+	if c.Wraps() != 0 {
+		t.Fatalf("the restart was counted as %d wraps", c.Wraps())
+	}
+	if got := c.LastPTS(); got != last+15*90000+3600 {
+		t.Fatalf("LastPTS = %d after restart, want %d", got, last+15*90000+3600)
+	}
+}
+
+func TestClockResumeBeforeAnyFrameIsAFreshStart(t *testing.T) {
+	// The connection hook fires before the first frame of the first
+	// connection too. With no timeline yet there is nothing to continue
+	// from, and the first frame must still map to zero.
+	c := NewClock()
+	c.Resume(3 * time.Second)
+	if got := c.PTS(99_000_000); got != 0 {
+		t.Fatalf("first frame PTS = %d, want 0", got)
+	}
+}
+
+func TestClockResumeAfterAWrapKeepsTheTimeline(t *testing.T) {
+	// A clock that has already counted a wrap must carry that elapsed time
+	// into the resumed timeline rather than starting the sum over.
+	c := NewClock()
+	c.PTS(4_294_000_000)
+	c.PTS(1_000_000) // wrapped: 1.967s elapsed
+	before := c.LastPTS()
+	c.Resume(time.Second)
+	if got := c.PTS(5_000_000); got != before+90000 {
+		t.Fatalf("PTS after wrap+resume = %d, want %d", got, before+90000)
 	}
 }

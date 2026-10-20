@@ -2,10 +2,14 @@ package stream
 
 import (
 	"context"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
+	"github.com/VoltTech21/reostream/internal/fakecam"
+	"github.com/VoltTech21/reostream/internal/hub"
 )
 
 func TestRunStopsWhenTheContextIsCancelled(t *testing.T) {
@@ -52,5 +56,61 @@ func TestDroppedEarlyAudioCountsADPCMNotAAC(t *testing.T) {
 	}
 	if droppedEarlyAudio(baichuan.FrameAAC) {
 		t.Error("AAC arriving before video is a genuine loss, but not an unsupported-codec drop")
+	}
+}
+
+// connectedSink counts the connection hook and records whether it fired
+// before any frame did.
+type connectedSink struct {
+	mu         sync.Mutex
+	connected  int
+	frames     int
+	info       int
+	frameFirst bool
+}
+
+func (s *connectedSink) Frame(f baichuan.Frame) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frames++
+	if f.Kind == baichuan.FrameInfo {
+		s.info++
+	}
+	if s.connected == 0 {
+		s.frameFirst = true
+	}
+}
+
+func (s *connectedSink) Connected() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connected++
+}
+
+// Connected fires once per camera connection, before any of its frames.
+func TestSinkIsToldWhenTheCameraConnects(t *testing.T) {
+	b, err := os.ReadFile("../baichuan/testdata/stream_s2c.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cam := fakecam.New(t, b)
+	sink := &connectedSink{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = Run(ctx, Config{Name: "t", Address: cam.Addr(), Stream: "sub", Sink: sink}, hub.New(64))
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.frames == 0 {
+		t.Fatal("no frames reached the sink")
+	}
+	if sink.connected != 1 {
+		t.Fatalf("Connected called %d times for one connection, want 1", sink.connected)
+	}
+	if sink.frameFirst {
+		t.Fatal("a frame reached the sink before Connected")
+	}
+	if sink.info == 0 {
+		t.Fatal("the camera's info packet, which carries the picture size, never reached the sink")
 	}
 }

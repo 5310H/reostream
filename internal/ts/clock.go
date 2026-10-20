@@ -7,6 +7,8 @@
 // thousands of frames.
 package ts
 
+import "time"
+
 // Clock converts the camera's capture time into MPEG-TS presentation
 // timestamps.
 //
@@ -31,6 +33,7 @@ type Clock struct {
 	last    uint32 // previous raw camera time, for wrap detection
 	wraps   uint64 // how many times the camera clock has rolled over
 	lastPTS uint64 // previous return value, for the monotonic clamp below
+	offset  uint64 // where the current camera timeline joins the PTS timeline, see Resume
 }
 
 func NewClock() *Clock { return &Clock{} }
@@ -48,7 +51,9 @@ func (c *Clock) PTS(micros uint32) uint64 {
 		c.started = true
 		c.base = micros
 		c.last = micros
-		return 0
+		c.wraps = 0
+		c.lastPTS = c.offset
+		return c.offset
 	}
 	if micros < c.last && c.last-micros > wrapThreshold {
 		c.wraps++
@@ -64,11 +69,11 @@ func (c *Clock) PTS(micros uint32) uint64 {
 	// the clamp below instead.
 	elapsed := int64(c.wraps<<32) + int64(micros) - int64(c.base)
 
-	var pts uint64
+	pts := c.offset
 	if elapsed > 0 {
 		// Microseconds to 90 kHz ticks: multiply by 9, divide by 100. Done in
 		// this order so the division does not throw away resolution.
-		pts = uint64(elapsed) * 9 / 100
+		pts += uint64(elapsed) * 9 / 100
 	}
 
 	if pts < c.lastPTS {
@@ -80,6 +85,24 @@ func (c *Clock) PTS(micros uint32) uint64 {
 	}
 	c.lastPTS = pts
 	return pts
+}
+
+// Resume starts a new camera timeline after a reconnect. A rebooted camera
+// restarts its counter, which otherwise either freezes PTS (up to 35 min) or
+// jumps it forward (up to 71 min). RTSP sessions outlive the camera
+// connection, so they need this; the TS muxer gets a new clock per connection.
+//
+// gap is how long the camera was gone. PTS continues from the last value
+// plus gap. Has no effect before the first frame.
+func (c *Clock) Resume(gap time.Duration) {
+	if !c.started {
+		return
+	}
+	if gap < 0 {
+		gap = 0
+	}
+	c.offset = c.lastPTS + uint64(gap/time.Microsecond)*9/100
+	c.started = false
 }
 
 // Wraps reports how many times this clock has decided the camera's

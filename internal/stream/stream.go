@@ -67,6 +67,14 @@ type FrameSink interface {
 	Frame(baichuan.Frame)
 }
 
+// ConnectionSink is a FrameSink that is told when a new camera connection
+// starts, before its first frame. Sinks that outlive a connection (RTSP)
+// use it to reset their clock after a camera reboot.
+type ConnectionSink interface {
+	FrameSink
+	Connected()
+}
+
 type Config struct {
 	Name     string
 	Address  string
@@ -179,6 +187,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	// never sends one is timed out on the same footing as one that stops
 	// partway through, rather than needing a separate "never started" check.
 	h.MarkConnected()
+	if cs, ok := cfg.Sink.(ConnectionSink); ok {
+		cs.Connected()
+	}
 	lastMedia := time.Now()
 
 	d := baichuan.NewDepacketiser()
@@ -268,6 +279,12 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 							// this raw elementary stream directly rather
 							// than decoding it: see hub.SetKeyframe.
 							h.SetKeyframe(f.Codec, f.Video())
+						}
+
+					case baichuan.FrameInfo:
+						// Pass the picture size on to sinks.
+						if cfg.Sink != nil {
+							cfg.Sink.Frame(f)
 						}
 
 					case baichuan.FrameAAC, baichuan.FrameADPCM:

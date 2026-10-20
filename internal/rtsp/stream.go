@@ -7,9 +7,11 @@
 package rtsp
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
@@ -36,13 +38,10 @@ const audioProbeFrames = 30
 // regardless of frame rate.
 const rtpClockHz = 90000
 
-// rtpTime converts the camera's microsecond clock to an RTP timestamp.
-//
-// The camera clock is the same source the TS muxer uses, so the two outputs
-// cannot disagree about when a frame happened. The multiply is done in 64
-// bits deliberately: the camera clock runs to 2^32 microseconds and a 32 bit
-// multiply by 90 overflows well before that, which would send timestamps
-// backwards near the wrap.
+// rtpTime converts camera microseconds to RTP ticks, ignoring wrap. Not used
+// for packetising: Micros is a uint32 and wraps every 71.58 minutes, which
+// made timestamps jump backwards and readers drop segments. Packets use
+// ts.Clock instead; this stays for the tests.
 func rtpTime(micros uint32) uint32 {
 	return uint32(uint64(micros) * rtpClockHz / 1_000_000)
 }
@@ -78,7 +77,17 @@ type Stream struct {
 	audioEnc   audioEncoder
 	audioCfg   *mpeg4audio.AudioSpecificConfig
 	audioClock *ts.AudioClock
+	videoClock *ts.Clock
 	lastVideo  uint64 // last video PTS in 90 kHz ticks, for the audio clock
+
+	// Set by Connected and cleared by the first video frame and the first
+	// keyframe of the new connection respectively. See Connected.
+	rebaseClock   bool
+	checkParams   bool
+	lastVideoWall time.Time // wall time of the last video frame, for the gap on rebase
+
+	// now is the wall clock, replaceable by tests. Nil means time.Now.
+	now func() time.Time
 
 	packetised int
 }
@@ -130,6 +139,23 @@ func (s *Stream) readerCount() int {
 	return s.readers
 }
 
+// Connected implements stream.ConnectionSink, called once per camera
+// connection. The clock is resumed (see ts.Clock.Resume), and the SDP is
+// rebuilt if the next keyframe brings different parameter sets.
+func (s *Stream) Connected() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rebaseClock = true
+	s.checkParams = true
+}
+
+func (s *Stream) wallNow() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
 func (s *Stream) close() {
 	s.mu.Lock()
 	ss := s.ss
@@ -164,12 +190,27 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 		}
 	}
 
+	// After a reconnect, check the SDP on the first keyframe.
+	s.refreshParameterSets(f)
+
 	// Track the video clock whether or not anyone is watching. The audio
 	// clock is anchored to it, and an anchor that only advances while a
 	// reader is attached would start every new session's audio from
 	// whenever the last one left.
-	ts90 := uint64(rtpTime(f.Micros))
+	// Use the wrap-counting clock. Truncating to 32 bits is the normal RTP
+	// wrap (13.25h at 90 kHz), which readers handle.
 	s.mu.Lock()
+	if s.videoClock == nil {
+		s.videoClock = ts.NewClock()
+	}
+	now := s.wallNow()
+	if s.rebaseClock {
+		// Wall time since the last frame before the reconnect.
+		s.videoClock.Resume(now.Sub(s.lastVideoWall))
+		s.rebaseClock = false
+	}
+	s.lastVideoWall = now
+	ts90 := s.videoClock.PTS(f.Micros)
 	s.lastVideo = ts90
 	s.mu.Unlock()
 
@@ -317,45 +358,9 @@ func (s *Stream) audioRTPTime(f baichuan.Frame) uint32 {
 // initialise builds the description from the parameter sets carried in a
 // keyframe and brings the server stream up.
 func (s *Stream) initialise(f baichuan.Frame) error {
-	nalus := splitAnnexB(f.Video())
-
-	// The camera reports its codec as "H265"/"H264". Compare case
-	// insensitively rather than pinning the spelling: this string comes off
-	// the wire and a model that varies it would silently serve nothing.
-	var fmtVideo format.Format
-	switch strings.ToLower(f.Codec) {
-	case "h265":
-		var vps, sps, pps []byte
-		for _, n := range nalus {
-			switch h265NALUType(n) {
-			case h265VPS:
-				vps = n
-			case h265SPS:
-				sps = n
-			case h265PPS:
-				pps = n
-			}
-		}
-		if vps == nil || sps == nil || pps == nil {
-			return errNoParameterSets
-		}
-		fmtVideo = &format.H265{PayloadTyp: 96, VPS: vps, SPS: sps, PPS: pps}
-	case "h264":
-		var sps, pps []byte
-		for _, n := range nalus {
-			switch h264NALUType(n) {
-			case h264SPS:
-				sps = n
-			case h264PPS:
-				pps = n
-			}
-		}
-		if sps == nil || pps == nil {
-			return errNoParameterSets
-		}
-		fmtVideo = &format.H264{PayloadTyp: 96, PacketizationMode: 1, SPS: sps, PPS: pps}
-	default:
-		return errUnsupportedCodec
+	fmtVideo, err := videoFormat(f)
+	if err != nil {
+		return err
 	}
 
 	media := &description.Media{
@@ -431,6 +436,94 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 	}
 	s.pendingKey = nil
 	return nil
+}
+
+// videoFormat builds the RTP format, parameter sets included, from the
+// elementary stream of a keyframe.
+func videoFormat(f baichuan.Frame) (format.Format, error) {
+	nalus := splitAnnexB(f.Video())
+
+	// Case-insensitive, in case a model spells it differently.
+	switch strings.ToLower(f.Codec) {
+	case "h265":
+		var vps, sps, pps []byte
+		for _, n := range nalus {
+			switch h265NALUType(n) {
+			case h265VPS:
+				vps = n
+			case h265SPS:
+				sps = n
+			case h265PPS:
+				pps = n
+			}
+		}
+		if vps == nil || sps == nil || pps == nil {
+			return nil, errNoParameterSets
+		}
+		return &format.H265{PayloadTyp: 96, VPS: vps, SPS: sps, PPS: pps}, nil
+	case "h264":
+		var sps, pps []byte
+		for _, n := range nalus {
+			switch h264NALUType(n) {
+			case h264SPS:
+				sps = n
+			case h264PPS:
+				pps = n
+			}
+		}
+		if sps == nil || pps == nil {
+			return nil, errNoParameterSets
+		}
+		return &format.H264{PayloadTyp: 96, PacketizationMode: 1, SPS: sps, PPS: pps}, nil
+	default:
+		return nil, errUnsupportedCodec
+	}
+}
+
+// sameParameterSets reports whether two formats have the same codec and
+// parameter sets.
+func sameParameterSets(a, b format.Format) bool {
+	switch x := a.(type) {
+	case *format.H265:
+		y, ok := b.(*format.H265)
+		return ok && bytes.Equal(x.VPS, y.VPS) && bytes.Equal(x.SPS, y.SPS) && bytes.Equal(x.PPS, y.PPS)
+	case *format.H264:
+		y, ok := b.(*format.H264)
+		return ok && bytes.Equal(x.SPS, y.SPS) && bytes.Equal(x.PPS, y.PPS)
+	}
+	return false
+}
+
+// refreshParameterSets rebuilds the SDP if the first keyframe after a
+// reconnect has different parameter sets. Rebuilding drops all readers, so
+// it only happens on a real change. Keyframes without parameter sets are
+// skipped.
+func (s *Stream) refreshParameterSets(f baichuan.Frame) {
+	if f.Kind != baichuan.FrameIFrame {
+		return
+	}
+	s.mu.Lock()
+	pending, current := s.checkParams, s.video
+	s.mu.Unlock()
+	if !pending || current == nil {
+		return
+	}
+	got, err := videoFormat(f)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.checkParams = false
+	same := sameParameterSets(current.Formats[0], got)
+	s.mu.Unlock()
+	if same {
+		return
+	}
+	s.close()
+	s.mu.Lock()
+	s.pendingKey = nil
+	s.mu.Unlock()
+	_ = s.initialise(f)
 }
 
 // errNoParameterSets means a keyframe arrived without the VPS, SPS or PPS the
