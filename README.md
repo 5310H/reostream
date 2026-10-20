@@ -105,15 +105,21 @@ No ffmpeg, GStreamer or RTSP server in the serving path.
 
 ## Tested on
 
-One fleet of eight wired cameras, four models, one firmware generation. It has been the
-only video path for that fleet's Frigate since September: 23 streams, 69 Mbps, about 60%
-of one CPU core, 29-59 MB of memory. Numbers in `docs/measurements.md`.
+| Model | Count | Firmware |
+|---|---|---|
+| RLC-810A (8 MP bullet) | 6 | v3.1.0.956_24022103 |
+| FE-P (fisheye) | 1 | v3.0.0.5336_2509021915 |
+| Duo 3 PoE (dual lens panorama) | 1 | v3.0.0.5049_2506302188 |
+
+reostream has been the only video path for this fleet's Frigate since September: 23
+streams, 69 Mbps, about 60% of one CPU core, 29-59 MB of memory. Numbers in
+`docs/measurements.md`.
 
 Not yet tested:
 
 - **Battery cameras.** They sleep and wake, and the protocol client has not seen them yet.
   Reports welcome.
-- Other people's cameras and firmware.
+- Other models and firmware.
 
 ## Camera control
 
