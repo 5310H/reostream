@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<Maintainer>
+  <Icon>https://raw.githubusercontent.com/VoltTech21/reostream/main/contrib/unraid/reostream.png</Icon>
+  <Profile>reostream, a free proxy for Reolink cameras. It pulls video over the camera's own protocol (the one the Reolink app and NVR use) instead of its RTSP server, and serves clean RTSP and HTTP streams to Frigate, go2rtc, Blue Iris or any recorder.</Profile>
+  <WebPage>https://github.com/VoltTech21/reostream</WebPage>
+  <Forum>https://github.com/VoltTech21/reostream/issues</Forum>
+</Maintainer>
