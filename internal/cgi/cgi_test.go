@@ -205,3 +205,51 @@ func TestCloseHandsTheSessionBack(t *testing.T) {
 		t.Errorf("nil Close: %v", err)
 	}
 }
+
+// A camera with HTTP turned off still answers over HTTPS, with a
+// self-signed certificate.
+func TestDialFallsBackToHTTPS(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(loginReply("tls")))
+	}))
+	defer srv.Close()
+
+	c, err := Dial(strings.TrimPrefix(srv.URL, "https://"), "admin", "")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if !strings.HasPrefix(c.base, "https://") {
+		t.Errorf("base = %q, want https", c.base)
+	}
+}
+
+// A camera that answers HTTP and refuses the login is not retried over
+// HTTPS: the refusal is the answer.
+func TestDialDoesNotFallBackOnRefusal(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(`[{"cmd":"Login","code":1,"error":{"detail":"invalid user","rspCode":-27}}]`))
+	}))
+	defer srv.Close()
+
+	_, err := Dial(strings.TrimPrefix(srv.URL, "http://"), "admin", "wrong")
+	if err == nil || !strings.Contains(err.Error(), "invalid user") {
+		t.Fatalf("err = %v, want the camera's refusal", err)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("%d requests, want 1", n)
+	}
+}
+
+// Neither scheme reachable says how to fix it.
+func TestDialNamesPortSettingsWhenUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	host := strings.TrimPrefix(srv.URL, "http://")
+	srv.Close()
+
+	_, err := Dial(host, "admin", "")
+	if err == nil || !strings.Contains(err.Error(), "Port Settings") {
+		t.Fatalf("err = %v, want a hint about Port Settings", err)
+	}
+}

@@ -12,7 +12,9 @@ package cgi
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,6 +75,11 @@ func Dial(host, user, password string) (*Client, error) {
 // a caller with its own deadline (a fleet apply's per-camera timeout, for
 // one) can have it actually interrupt a hung login rather than only bound
 // the gap between calls.
+//
+// It tries HTTP first, then HTTPS. Newer firmware ships with HTTP turned
+// off, and HTTPS uses a self-signed certificate, so it is not verified.
+// Only a failure to reach the API falls through to HTTPS; a camera that
+// answers and refuses the login is reported as it is.
 func DialContext(ctx context.Context, host, user, password string) (*Client, error) {
 	c := &Client{
 		base:     "http://" + host + "/cgi-bin/api.cgi",
@@ -80,10 +87,41 @@ func DialContext(ctx context.Context, host, user, password string) (*Client, err
 		password: password,
 		http:     &http.Client{Timeout: 20 * time.Second},
 	}
-	if err := c.login(ctx); err != nil {
-		return nil, err
+	httpErr := c.login(ctx)
+	if httpErr == nil {
+		return c, nil
 	}
-	return c, nil
+	var refused *replyError
+	if errors.As(httpErr, &refused) || ctx.Err() != nil {
+		return nil, httpErr
+	}
+	c.base = "https://" + host + "/cgi-bin/api.cgi"
+	c.http = &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
+	httpsErr := c.login(ctx)
+	if httpsErr == nil {
+		return c, nil
+	}
+	if errors.As(httpsErr, &refused) {
+		return nil, httpsErr
+	}
+	return nil, fmt.Errorf("cgi: %s: could not reach the camera's HTTP or HTTPS API; "+
+		"turn one of them on in the Reolink app under Network > Advanced > Port Settings "+
+		"(http: %v; https: %v)", host, httpErr, httpsErr)
+}
+
+// replyError is a camera answering with an error, as opposed to a request
+// that never got an answer from the API.
+type replyError struct {
+	cmd     string
+	detail  string
+	rspCode int
+}
+
+func (e *replyError) Error() string {
+	return fmt.Sprintf("cgi: %s: %s (rspCode %d)", e.cmd, e.detail, e.rspCode)
 }
 
 // login exchanges the credentials for a fresh token.
@@ -189,7 +227,7 @@ func (c *Client) do(ctx context.Context, cmd string, action int, param any, out 
 	if e := (*out)[0].Error; e != nil {
 		// A camera reports an unsupported command as an error rather than
 		// failing the request, so this is also how a capability is probed.
-		return fmt.Errorf("cgi: %s: %s (rspCode %d)", cmd, e.Detail, e.RspCode)
+		return &replyError{cmd: cmd, detail: e.Detail, rspCode: e.RspCode}
 	}
 	return nil
 }
