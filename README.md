@@ -103,6 +103,7 @@ Also on port 8560:
 - Timestamps from the camera's own clock, so frame rates come out right.
 - A slow client is disconnected, never buffered. No client can stall a camera.
 - New clients start at a keyframe. Audio is carried when the camera sends it.
+- Two-way audio: on cameras with a speaker, Frigate's talk button works through it.
 - Sessions are closed cleanly. A camera left with an open session refuses connections
   for minutes.
 - A web page on port 8562 for status, live view, config, logs and camera settings.

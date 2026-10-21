@@ -28,6 +28,7 @@ import (
 	"github.com/VoltTech21/reostream/internal/server"
 	"github.com/VoltTech21/reostream/internal/stream"
 	"github.com/VoltTech21/reostream/internal/supervisor"
+	"github.com/VoltTech21/reostream/internal/talk"
 )
 
 // defaultListen is used when neither the config file nor -listen sets one.
@@ -242,7 +243,9 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 		if rtspSrv == nil {
 			return fs
 		}
-		return multiSink{rtspSrv.Add(path), fs}
+		rs := rtspSrv.Add(path)
+		rs.SetTalker(cameraTalker{name: camera, sup: sup})
+		return multiSink{rs, fs}
 	})
 	if rtspSrv != nil {
 		if err := rtspSrv.Start(); err != nil {
@@ -551,8 +554,44 @@ func (m multiSink) Frame(f baichuan.Frame) {
 	}
 }
 
+func (m multiSink) SetSpeaker(has bool) {
+	for _, s := range m {
+		if ss, ok := s.(stream.SpeakerSink); ok {
+			ss.SetSpeaker(has)
+		}
+	}
+}
+
 func (m multiSink) Connected() {
 	for _, s := range m {
 		s.Connected()
 	}
+}
+
+// cameraTalker opens talk sessions on one camera, looking its address and
+// login up at the moment of talking so a camera edited on the page is
+// reached where it now is.
+type cameraTalker struct {
+	name string
+	sup  *supervisor.Supervisor
+}
+
+func (c cameraTalker) Open(ctx context.Context) (rtsp.TalkSession, error) {
+	cfg, ok := c.sup.CameraConfig(c.name)
+	if !ok {
+		return nil, fmt.Errorf("camera %q is no longer configured", c.name)
+	}
+	sess, err := talk.Open(ctx, func(ctx context.Context) (*baichuan.Conn, error) {
+		return baichuan.Dial(ctx, cfg.Address, baichuan.Options{
+			Username: cfg.Username,
+			Password: cfg.Password,
+			// The camera sends nothing back during a talk session, and the
+			// session pings rather than relying on traffic to stay up.
+			IdleTimeout: 24 * time.Hour,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sess, nil
 }

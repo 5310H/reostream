@@ -170,6 +170,19 @@ func New(cams []config.Camera, run Runner) *Supervisor {
 	return s
 }
 
+// CameraConfig returns the connection details the supervisor currently
+// holds for camera name, reflecting any Reload since startup.
+func (s *Supervisor) CameraConfig(name string) (stream.Config, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.cfg.Name == name {
+			return e.cfg, true
+		}
+	}
+	return stream.Config{}, false
+}
+
 // AttachSinks gives every stream named in a camera's rtsp list a frame sink,
 // built by sinkFor.
 //

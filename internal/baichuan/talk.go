@@ -1,8 +1,10 @@
 package baichuan
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"fmt"
 )
 
@@ -104,4 +106,60 @@ func TalkPacket(block []byte) []byte {
 	out = binary.LittleEndian.AppendUint16(out, uint16(len(block)-4))
 	out = append(out, block...)
 	return out
+}
+
+// ErrNoSpeaker is OpenTalk refusing a camera whose Support block says it has
+// nothing to play sound through.
+var ErrNoSpeaker = errors.New("baichuan: this camera has no speaker (Support reports audioTalk 0)")
+
+// OpenTalk opens a two-way audio session on conn and returns the format the
+// camera agreed to, which every Talk packet on conn must then be in.
+//
+// The speaker check comes first and is not optional. A camera without one
+// accepts the configuration with a 200, plays nothing, and then refuses every
+// later session until it reboots, so asking costs one round trip and not
+// asking can cost the feature on that camera until someone power cycles it.
+func OpenTalk(ctx context.Context, conn *Conn) (TalkFormat, error) {
+	sup, err := GetSupport(ctx, conn)
+	if err != nil {
+		return TalkFormat{}, fmt.Errorf("baichuan: talk: could not check for a speaker: %w", err)
+	}
+	if !sup.CanTalk() {
+		return TalkFormat{}, ErrNoSpeaker
+	}
+
+	if err := conn.TalkAbility(); err != nil {
+		return TalkFormat{}, err
+	}
+	var f TalkFormat
+	for {
+		// The camera can answer the ability query with an empty message
+		// before the document; only the one with a body is the answer.
+		m, err := awaitMessage(ctx, conn, MsgIDTalkAbility)
+		if err != nil {
+			return TalkFormat{}, err
+		}
+		if len(m.XML) == 0 {
+			continue
+		}
+		if f, err = ParseTalkAbility(m.XML); err != nil {
+			return TalkFormat{}, err
+		}
+		break
+	}
+	if f.AudioType != "adpcm" {
+		return TalkFormat{}, fmt.Errorf("baichuan: talk: camera wants %q audio, which is not implemented", f.AudioType)
+	}
+
+	if err := conn.TalkConfig(f); err != nil {
+		return TalkFormat{}, err
+	}
+	m, err := awaitMessage(ctx, conn, MsgIDTalkConfig)
+	if err != nil {
+		return TalkFormat{}, err
+	}
+	if st := m.Header.Status(); st != 200 {
+		return TalkFormat{}, fmt.Errorf("baichuan: talk: camera refused the session with status %d (%s)", st, ExplainStatus(st))
+	}
+	return f, nil
 }

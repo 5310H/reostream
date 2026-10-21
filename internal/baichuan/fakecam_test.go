@@ -87,8 +87,9 @@ func synthesizeLoginFailureFixture(nonce string) []byte {
 // fakeReply is one AES-encrypted post-login message to append after a
 // synthesized successful login.
 type fakeReply struct {
-	id   uint32
-	body string
+	id     uint32
+	body   string
+	status int16 // 0 leaves the status bytes zero, as most replies here do
 }
 
 // synthesizeSessionFixture builds a successful login handshake, a
@@ -121,7 +122,8 @@ func synthesizeSessionFixture(t *testing.T, nonce, password, deviceInfoXML strin
 		if err != nil {
 			t.Fatalf("encrypt reply %d: %v", r.id, err)
 		}
-		out = append(out, buildMessage(Header{MsgID: r.id, Class: ClassZero}, enc)...)
+		h := Header{MsgID: r.id, Class: ClassZero, EncByte: byte(r.status), DirByte: byte(uint16(r.status) >> 8)}
+		out = append(out, buildMessage(h, enc)...)
 	}
 	return out
 }

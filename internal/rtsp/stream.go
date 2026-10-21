@@ -90,6 +90,43 @@ type Stream struct {
 	now func() time.Time
 
 	packetised int
+
+	// talker opens talk sessions on this stream's camera, and speaker is
+	// whether the camera has anything to play them through. Both must be
+	// settled before the first keyframe: the description is fixed once the
+	// server stream is up, and a back channel is only offered when both
+	// hold. See SetTalker and SetSpeaker.
+	talker  Talker
+	speaker bool
+	back    *description.Media
+}
+
+// SetTalker gives the stream a way to reach its camera's speaker.
+func (s *Stream) SetTalker(t Talker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.talker = t
+}
+
+// SetSpeaker records whether the camera has a speaker, from its own Support
+// block. internal/stream calls it on each connection before asking for
+// video, so it is known by the time the first keyframe builds the
+// description.
+func (s *Stream) SetSpeaker(has bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.speaker = has
+}
+
+// backChannel returns the back channel media and the talker behind it, or
+// nil when this stream offers none.
+func (s *Stream) backChannel() (*description.Media, Talker) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.back == nil {
+		return nil, nil
+	}
+	return s.back, s.talker
 }
 
 // audioEncoder is the shape of the AAC RTP encoder this package uses.
@@ -399,6 +436,14 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 		}
 	}
 
+	s.mu.Lock()
+	var back *description.Media
+	if s.talker != nil && s.speaker {
+		back = backChannelMedia()
+		medias = append(medias, back)
+	}
+	s.mu.Unlock()
+
 	desc := &description.Session{Medias: medias}
 
 	var enc videoEncoder
@@ -431,6 +476,7 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 	}
 	s.desc, s.video, s.enc, s.ready = desc, media, enc, true
 	s.audio, s.audioEnc = audioMedia, audioEnc
+	s.back = back
 	if audioMedia != nil {
 		s.audioClock = ts.NewAudioClock()
 	}

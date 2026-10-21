@@ -9,6 +9,8 @@ import (
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/pion/rtp"
 )
 
 // Server serves camera streams over RTSP.
@@ -21,6 +23,8 @@ type Server struct {
 	mu       sync.RWMutex
 	streams  map[string]*Stream
 	sessions map[*gortsplib.ServerSession]*Stream
+	// talking holds the back channel of each session that set one up.
+	talking map[*gortsplib.ServerSession]*backChannel
 	// drops counts packets dropped per path since they were last
 	// reported. See OnStreamWriteError.
 	drops map[string]*dropCount
@@ -34,6 +38,7 @@ func New(listen string) *Server {
 	s := &Server{
 		streams:  make(map[string]*Stream),
 		sessions: make(map[*gortsplib.ServerSession]*Stream),
+		talking:  make(map[*gortsplib.ServerSession]*backChannel),
 	}
 	s.srv = &gortsplib.Server{
 		Handler:        s,
@@ -204,8 +209,42 @@ func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, 
 	s.mu.RUnlock()
 	if st != nil {
 		st.addReader()
+		s.listenBackChannel(ctx.Session, st)
 	}
 	return &base.Response{StatusCode: base.StatusOK}, nil
+}
+
+// listenBackChannel starts carrying a session's back channel audio to the
+// camera, if the client set one up. gortsplib only offers the back channel
+// to clients that ask for it with the ONVIF Require header, as go2rtc does,
+// so a plain player never sees it.
+func (s *Server) listenBackChannel(ss *gortsplib.ServerSession, st *Stream) {
+	back, talker := st.backChannel()
+	if back == nil || talker == nil {
+		return
+	}
+	setup := false
+	for _, m := range ss.Medias() {
+		if m == back {
+			setup = true
+		}
+	}
+	if !setup {
+		return
+	}
+	bc := newBackChannel(strings.Trim(ss.Path(), "/"), talker)
+	s.mu.Lock()
+	s.talking[ss] = bc
+	s.mu.Unlock()
+	for _, f := range back.Formats {
+		g, ok := f.(*format.G711)
+		if !ok {
+			continue
+		}
+		ss.OnPacketRTP(back, f, func(pkt *rtp.Packet) {
+			bc.packet(g, pkt.Payload)
+		})
+	}
 }
 
 // OnSessionClose has to drop the reader whatever ended the session, which
@@ -215,9 +254,14 @@ func (s *Server) OnSessionClose(ctx *gortsplib.ServerHandlerOnSessionCloseCtx) {
 	s.mu.Lock()
 	st := s.sessions[ctx.Session]
 	delete(s.sessions, ctx.Session)
+	bc := s.talking[ctx.Session]
+	delete(s.talking, ctx.Session)
 	s.mu.Unlock()
 	if st != nil {
 		st.removeReader()
+	}
+	if bc != nil {
+		bc.close()
 	}
 }
 

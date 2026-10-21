@@ -133,6 +133,17 @@ the `[rtsp]` section to turn it off.
 Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`. TCP interleaved is the
 default; UDP is offered, but a lost packet is a corrupt frame.
 
+### Two-way audio
+
+On a camera with a speaker, each RTSP stream also offers an ONVIF back channel, so
+Frigate's talk button works through go2rtc with no extra config. Only clients that ask
+for a back channel see it; ffmpeg and other players get the same streams as before.
+
+reostream checks the camera's own hardware report before offering it. A camera without
+a speaker never gets a back channel, because one that is sent a talk session anyway
+breaks talk until it reboots. Speech is sent to the camera over its own connection,
+opened when audio starts and closed a few seconds after it stops.
+
 ## Frames feed
 
 `/<cam>.frames` on port 8560 streams one record per access unit, for clients that feed a

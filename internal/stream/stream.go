@@ -75,6 +75,12 @@ type ConnectionSink interface {
 	Connected()
 }
 
+// SpeakerSink is a sink that offers two-way audio and so needs to know,
+// before the first frame, whether the camera has a speaker.
+type SpeakerSink interface {
+	SetSpeaker(bool)
+}
+
 type Config struct {
 	Name     string
 	Address  string
@@ -167,6 +173,19 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 			err = fmt.Errorf("stream: %s: panic: %v", cfg.Name, r)
 		}
 	}()
+
+	// Ask before StartVideo, while nothing else is arriving: the answer has
+	// to be in before the first keyframe fixes the sink's description. A
+	// camera whose Support block cannot be read is left as it was rather
+	// than failing the stream, since video does not depend on it.
+	if ss, ok := cfg.Sink.(SpeakerSink); ok {
+		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		sup, err := baichuan.GetSupport(sctx, conn)
+		cancel()
+		if err == nil {
+			ss.SetSpeaker(sup.CanTalk())
+		}
+	}
 
 	if err := conn.StartVideo(kind); err != nil {
 		return fmt.Errorf("stream: %s: start video: %w", cfg.Name, err)
