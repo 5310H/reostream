@@ -111,6 +111,35 @@ rtsp = ["main", "sub"]
 - Unknown keys are an error at startup, so a typo fails at boot instead of serving 404s.
 - Saving from the page validates first and reloads only the cameras that changed.
 
+### Home Hub and NVR cameras
+
+A camera paired to a Reolink Home Hub or NVR is reached through the hub, as a numbered
+channel starting at 0. Add one `[[camera]]` block per camera, all with the hub's address
+and login, each with its own `channel`:
+
+```toml
+[[camera]]
+name = "porch"
+address = "192.0.2.20"
+username = "admin"
+password = "$HUB_PASSWORD"
+channel = 0
+streams = ["main", "sub"]
+
+[[camera]]
+name = "yard"
+address = "192.0.2.20"
+username = "admin"
+password = "$HUB_PASSWORD"
+channel = 1
+streams = ["main", "sub"]
+```
+
+Channels are added by hand in the config for now; the Setup page does not ask for one.
+Video works for hub cameras, but their per-camera settings page is refused, because those
+settings would reach channel 0 instead. This is untested on a real hub so far, so please
+report how it goes.
+
 ## Control page
 
 The control port (8562) is the only part with a password. The streaming port (8560) is

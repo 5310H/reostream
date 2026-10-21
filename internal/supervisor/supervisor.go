@@ -161,6 +161,7 @@ func New(cams []config.Camera, run Runner) *Supervisor {
 					Username: cam.Username,
 					Password: cam.Password,
 					Stream:   st,
+					Channel:  cam.Channel,
 				},
 				h:    h,
 				stat: StreamStat{Camera: cam.Name, Stream: st},
@@ -430,6 +431,7 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 				Username: cam.Username,
 				Password: cam.Password,
 				Stream:   st,
+				Channel:  cam.Channel,
 			},
 			h:    h,
 			stat: StreamStat{Camera: cam.Name, Stream: st},
@@ -456,6 +458,7 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 // drop and rebuild its main stream's camera connection.
 func sameStream(e *entry, cam config.Camera) bool {
 	return e.cfg.Address == cam.Address &&
+		e.cfg.Channel == cam.Channel &&
 		e.cfg.Username == cam.Username &&
 		e.cfg.Password == cam.Password &&
 		slices.Contains(cam.RTSP, e.cfg.Stream) == slices.Contains(e.rtsp, e.cfg.Stream)

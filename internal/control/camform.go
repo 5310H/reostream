@@ -89,6 +89,10 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		if cam.Password == passwordUnchanged {
 			cam.Password = existing.Password
 		}
+		// The form has no channel field, so an edit keeps the one the file
+		// has. Dropping it would quietly repoint a hub camera at channel 0,
+		// which is another camera.
+		cam.Channel = existing.Channel
 		cfg.Cameras[i] = cam
 		// cfg.Validate: the daemon's own validation runs over the whole
 		// config, so a form submission is held to exactly the rules
@@ -214,6 +218,9 @@ func cameraBlockText(cam config.Camera) string {
 			quoted[i] = fmt.Sprintf("%q", v)
 		}
 		fmt.Fprintf(&b, "%s = [%s]\n", key, strings.Join(quoted, ", "))
+	}
+	if cam.Channel != 0 {
+		fmt.Fprintf(&b, "channel = %d\n", cam.Channel)
 	}
 	writeList("streams", cam.Streams)
 	writeList("rtsp", cam.RTSP)

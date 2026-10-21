@@ -2,6 +2,8 @@ package control
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -184,5 +186,50 @@ func TestFormAddServesRTSPWhenItIsOn(t *testing.T) {
 	}
 	if got := strings.Join(cfg.Cameras[0].RTSP, ","); got != "main,sub" {
 		t.Fatalf("rtsp = %q", got)
+	}
+}
+
+// The form has no channel field. Editing a hub camera from the page must
+// keep its channel, or the next save points it at channel 0, another camera.
+func TestFormEditKeepsAHubCamerasChannel(t *testing.T) {
+	cfg := &config.Config{Cameras: []config.Camera{
+		{Name: "yard", Address: "1.1.1.1", Channel: 2, Password: "x", Streams: []string{"main"}},
+	}}
+	form := url.Values{
+		"name":     {"yard"},
+		"address":  {"1.1.1.1"},
+		"password": {passwordUnchanged},
+		"streams":  {"main", "sub"},
+	}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cameras[0].Channel != 2 {
+		t.Fatalf("channel became %d", cfg.Cameras[0].Channel)
+	}
+	if !strings.Contains(cameraBlockText(cfg.Cameras[0]), "channel = 2\n") {
+		t.Fatal("the written block drops the channel")
+	}
+	if strings.Contains(cameraBlockText(config.Camera{Name: "a"}), "channel") {
+		t.Fatal("a standalone camera's block gained a channel line")
+	}
+}
+
+// Camera settings address channel 0 on every path, which behind a hub is a
+// different camera, so a hub camera's settings page must refuse outright.
+func TestSettingsRefuseAHubCamera(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	text := "[control]\nlisten = \"127.0.0.1:0\"\npassword = \"abcdefghijklmnop\"\n\n" +
+		"[[camera]]\nname = \"yard\"\naddress = \"192.0.2.9\"\nchannel = 1\nstreams = [\"main\"]\n\n" +
+		"[[camera]]\nname = \"porch\"\naddress = \"192.0.2.10\"\nstreams = [\"main\"]\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{opts: Options{ConfigPath: path}}
+	if _, err := s.byName("yard"); err == nil || !strings.Contains(err.Error(), "channel 1") {
+		t.Fatalf("byName(hub camera) = %v, want a refusal naming the channel", err)
+	}
+	if _, err := s.byName("porch"); err != nil {
+		t.Fatalf("byName(standalone camera) = %v", err)
 	}
 }

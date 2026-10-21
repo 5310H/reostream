@@ -21,6 +21,12 @@ type Camera struct {
 	Password string
 	Streams  []string
 
+	// Channel picks one camera behind a device that serves several, a
+	// Reolink Home Hub or NVR, where Address is the hub's and each paired
+	// camera is a numbered channel from 0. A camera on its own is always
+	// channel 0, which is also what leaving it out means.
+	Channel int
+
 	// RTSP names which of this camera's streams to serve over RTSP. Absent
 	// means none, and every stream still reaches the HTTP output either way.
 	RTSP []string
@@ -200,6 +206,9 @@ func (c *Config) Validate() error {
 		if cam.Address == "" {
 			return fmt.Errorf("camera %q has no address", cam.Name)
 		}
+		if cam.Channel < 0 || cam.Channel > 63 {
+			return fmt.Errorf("camera %q: channel %d is out of range (0 to 63)", cam.Name, cam.Channel)
+		}
 		if seenNames[cam.Name] {
 			return fmt.Errorf("camera name %q is used more than once", cam.Name)
 		}
@@ -219,7 +228,12 @@ func (c *Config) Validate() error {
 			seenStreams[s] = true
 		}
 
+		// A hub serves each of its cameras as a channel on one address, so
+		// it is address and channel together that name one camera.
 		naddr := NormalizeAddr(cam.Address)
+		if cam.Channel != 0 {
+			naddr = fmt.Sprintf("%s#%d", naddr, cam.Channel)
+		}
 		for _, s := range cam.Streams {
 			if owner, taken := seenAddrStreams[naddr][s]; taken {
 				return fmt.Errorf("camera %q and camera %q share address %q on stream %q: "+

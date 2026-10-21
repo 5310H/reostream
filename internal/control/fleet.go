@@ -17,6 +17,7 @@ type Camera struct {
 	Address  string
 	Username string
 	Password string
+	Channel  int
 }
 
 // fleet reads the camera list from reostream's config.
@@ -55,6 +56,7 @@ func loadFleet(configPath string) ([]Camera, error) {
 		out = append(out, Camera{
 			Name: c.Name, Address: c.Address,
 			Username: c.Username, Password: c.Password,
+			Channel: c.Channel,
 		})
 	}
 	return out, nil
@@ -69,6 +71,12 @@ func (s *Server) byName(name string) (Camera, error) {
 	}
 	for _, c := range cams {
 		if c.Name == name {
+			if c.Channel != 0 {
+				// Every settings path here, Baichuan and HTTP alike,
+				// addresses channel 0. Behind a hub that is a different
+				// camera, so refuse rather than change the wrong one.
+				return Camera{}, fmt.Errorf("control: %q is channel %d on a hub or NVR; its video works, but camera settings for hub cameras are not supported yet", name, c.Channel)
+			}
 			return c, nil
 		}
 	}

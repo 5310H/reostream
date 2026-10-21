@@ -21,6 +21,7 @@ import (
 	"github.com/VoltTech21/reostream/internal/adpcm"
 	"github.com/VoltTech21/reostream/internal/baichuan"
 	"github.com/VoltTech21/reostream/internal/cgi"
+	talkpkg "github.com/VoltTech21/reostream/internal/talk"
 )
 
 func usage() {
@@ -49,6 +50,7 @@ func main() {
 	pass := flag.String("password", "", "password")
 	withVideo := flag.String("with-video", "", "open this video stream first: main, sub or extern")
 	noConfig := flag.Bool("no-config", false, "skip TalkConfig and send audio into an existing session")
+	talkRate = flag.Int("rate", 16000, "sample rate of the raw PCM file talk plays")
 	hb2 := flag.Bool("hb-twopart", false, "send the heartbeat as an extension plus a body")
 	flag.Usage = usage
 	flag.Parse()
@@ -187,6 +189,9 @@ func talkFormat(conn *baichuan.Conn, print bool) (baichuan.TalkFormat, error) {
 	}
 }
 
+// talkRate is -rate, read by talkSession.
+var talkRate *int
+
 // talk plays a file through the camera's speaker.
 //
 // Nothing in the protocol confirms a camera actually made a sound: it
@@ -203,6 +208,9 @@ func talkFormat(conn *baichuan.Conn, print bool) (baichuan.TalkFormat, error) {
 func talk(conn *baichuan.Conn, args []string, withVideo string, noConfig bool) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: talk FILE  (raw signed 16 bit little endian mono PCM)")
+	}
+	if withVideo == "" && !noConfig {
+		return talkSession(conn, args[0])
 	}
 	format, err := talkFormat(conn, false)
 	if err != nil {
@@ -267,6 +275,42 @@ func talk(conn *baichuan.Conn, args []string, withVideo string, noConfig bool) e
 		time.Sleep(time.Until(next))
 	}
 	fmt.Printf("played %.1f seconds\n", float64(len(pcm))/float64(format.SampleRate))
+	return nil
+}
+
+// talkSession plays a file through the same path the RTSP back channel uses,
+// internal/talk, so a camera can be checked end to end from the command line
+// without Frigate. The file is raw 16 bit mono PCM at -rate; it is resampled
+// to whatever the camera asks for.
+func talkSession(conn *baichuan.Conn, file string) error {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	pcm := make([]int16, len(raw)/2)
+	for i := range pcm {
+		pcm[i] = int16(binary.LittleEndian.Uint16(raw[i*2:]))
+	}
+	sess, err := talkpkg.Open(context.Background(), func(context.Context) (*baichuan.Conn, error) {
+		return conn, nil
+	})
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	// Real time, in 20 ms pieces, the way an RTP back channel arrives.
+	piece := *talkRate / 50
+	next := time.Now()
+	for off := 0; off < len(pcm); off += piece {
+		end := min(off+piece, len(pcm))
+		if err := sess.Write(*talkRate, pcm[off:end]); err != nil {
+			return err
+		}
+		next = next.Add(20 * time.Millisecond)
+		time.Sleep(time.Until(next))
+	}
+	fmt.Printf("played %.1f seconds\n", float64(len(pcm))/float64(*talkRate))
 	return nil
 }
 

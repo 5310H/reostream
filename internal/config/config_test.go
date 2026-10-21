@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -269,5 +270,41 @@ func TestACameraWithNoStreamsIsStillRejected(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("a camera with no streams was accepted")
+	}
+}
+
+// A Home Hub or NVR serves each paired camera as a channel on one address,
+// so several cameras sharing an address and every stream is the normal case
+// there, as long as their channels differ.
+func TestHubCamerasShareAnAddressOnDifferentChannels(t *testing.T) {
+	cfg := &Config{Cameras: []Camera{
+		{Name: "porch", Address: "192.0.2.9", Channel: 0, Streams: []string{"main", "sub"}},
+		{Name: "yard", Address: "192.0.2.9", Channel: 1, Streams: []string{"main", "sub"}},
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("hub cameras on separate channels rejected: %v", err)
+	}
+	cfg.Cameras[1].Channel = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("two cameras on the same hub channel and stream accepted")
+	}
+	cfg.Cameras[1].Channel = 64
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("channel 64 accepted")
+	}
+}
+
+func TestChannelLoadsFromTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	text := "[[camera]]\nname = \"yard\"\naddress = \"192.0.2.9\"\nchannel = 3\nstreams = [\"main\"]\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cameras[0].Channel != 3 {
+		t.Fatalf("channel = %d, want 3", cfg.Cameras[0].Channel)
 	}
 }

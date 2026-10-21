@@ -87,6 +87,7 @@ type Config struct {
 	Username string
 	Password string
 	Stream   string // "main", "sub" or "extern"
+	Channel  int    // the camera's channel on a hub or NVR; 0 on its own
 
 	// Sink, when non-nil, receives every decoded frame before muxing. Nil
 	// is the default and the only state the HTTP output has ever run in.
@@ -150,6 +151,7 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	conn, err := baichuan.Dial(ctx, cfg.Address, baichuan.Options{
 		Username: cfg.Username,
 		Password: cfg.Password,
+		Channel:  cfg.Channel,
 	})
 	if err != nil {
 		return fmt.Errorf("stream: %s: dial: %w", cfg.Name, err)
