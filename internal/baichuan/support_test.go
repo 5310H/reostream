@@ -1,6 +1,10 @@
 package baichuan
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
 
 const supportFixture = `<?xml version="1.0" encoding="UTF-8" ?>
 <body>
@@ -75,5 +79,70 @@ func TestSupportReportsNoPTZOnAFixedCamera(t *testing.T) {
 	}
 	if s.HasPTZ() {
 		t.Error("HasPTZ true for a camera reporting ptzMode none")
+	}
+}
+
+// supportReply frames body as a camera's reply to the support read, with
+// PayloadOff at off (0 for none), and reads it back through a Reader keyed
+// with key.
+func supportReply(t *testing.T, key, body []byte, off uint32) Message {
+	t.Helper()
+	h := Header{MsgID: MsgIDGetSupport, MsgLen: uint32(len(body)), EncByte: 200, Class: ClassModern24, PayloadOff: off}
+	r := NewReader(bytes.NewReader(append(h.Encode(), body...)))
+	r.SetAESKey(key)
+	m, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func TestSupportReplyLayouts(t *testing.T) {
+	key := AESKey(fixtureNonce, fixturePassword)
+	doc := supportXML("1", "0")
+	enc := func(b []byte) []byte {
+		out, err := AESEncrypt(key, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	ext := []byte(`<?xml version="1.0" encoding="UTF-8" ?>` + "\n" + `<Extension version="1.1">` + "\n<channelId>0</channelId>\n</Extension>\n")
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+		off  uint32
+	}{
+		{"document alone", enc(doc), 0},
+		{"offset inside the document", enc(doc), 90},
+		{"extension then a separately encrypted document", append(enc(ext), enc(doc)...), uint32(len(ext))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := parseSupportReply(supportReply(t, key, tc.body, tc.off))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !s.CanTalk() || s.Support.ChannelNum != 1 {
+				t.Fatalf("parsed %+v", s.Support)
+			}
+		})
+	}
+}
+
+func TestSupportReplyErrorDescribesTheReply(t *testing.T) {
+	key := AESKey(fixtureNonce, fixturePassword)
+	cut, err := AESEncrypt(key, supportXML("1", "0")[:90])
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = parseSupportReply(supportReply(t, key, cut, 0))
+	if err == nil {
+		t.Fatal("a truncated document parsed")
+	}
+	for _, want := range []string{"status 200", "body 90 bytes", "payload offset 0", "<Support"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q lacks %q", err, want)
+		}
 	}
 }

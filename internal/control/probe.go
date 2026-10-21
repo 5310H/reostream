@@ -257,9 +257,14 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 	}
 	defer conn.Close()
 
-	sup, err := baichuan.GetSupport(ctx, conn)
-	if err != nil {
-		return CameraReport{Err: "connected, but the camera did not answer a support read: " + err.Error()}
+	// The support read only refines the probe: it names the channel count
+	// and rules the extern stream out early. A camera whose answer does not
+	// parse (an E1 Zoom on v3.0.0.2356 sent a truncated one) still has
+	// streams worth finding, so carry on without it and only report it if
+	// nothing else works either.
+	sup, supErr := baichuan.GetSupport(ctx, conn)
+	if supErr != nil {
+		log.Printf("control: probe %s: support read: %v", addr, supErr)
 	}
 
 	rep := CameraReport{Model: modelName(conn, sup)}
@@ -282,6 +287,9 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 	}
 	if !anyPresent {
 		rep.Err = "logged in, but no stream on this camera could be confirmed (see detail below)"
+		if supErr != nil {
+			rep.Err += "; the support read also failed: " + supErr.Error()
+		}
 	}
 	return rep
 }

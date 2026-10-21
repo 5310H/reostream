@@ -50,21 +50,31 @@ func WriteConfig(ctx context.Context, conn *Conn, id uint32, body []byte) (int16
 // awaitReply waits for the reply carrying id. Anything else in flight, a
 // ping reply for instance, is not the answer.
 func awaitReply(ctx context.Context, conn *Conn, id uint32) ([]byte, int16, error) {
+	m, err := awaitMessage(ctx, conn, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	return m.XML, m.Header.Status(), nil
+}
+
+// awaitMessage is awaitReply returning the whole message, for a caller that
+// needs more than the XML section.
+func awaitMessage(ctx context.Context, conn *Conn, id uint32) (Message, error) {
 	for {
 		select {
 		case m, ok := <-conn.Messages():
 			if !ok {
 				if err := conn.Err(); err != nil {
-					return nil, 0, fmt.Errorf("baichuan: connection closed waiting for message %d: %w", id, err)
+					return Message{}, fmt.Errorf("baichuan: connection closed waiting for message %d: %w", id, err)
 				}
-				return nil, 0, fmt.Errorf("baichuan: connection closed waiting for message %d", id)
+				return Message{}, fmt.Errorf("baichuan: connection closed waiting for message %d", id)
 			}
 			if m.Header.MsgID != id {
 				continue
 			}
-			return m.XML, m.Header.Status(), nil
+			return m, nil
 		case <-ctx.Done():
-			return nil, 0, ctx.Err()
+			return Message{}, ctx.Err()
 		}
 	}
 }

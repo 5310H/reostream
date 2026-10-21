@@ -3,6 +3,7 @@ package baichuan
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // StatusNotImplemented is the status a camera answers for a config message
@@ -65,17 +66,53 @@ func requestConfig(ctx context.Context, conn *Conn, id uint32) ([]byte, int16, e
 // lifted here rather than duplicated so the CLI and anything else in this
 // module cannot answer the question two different ways.
 func GetSupport(ctx context.Context, conn *Conn) (Support, error) {
-	x, status, err := requestConfig(ctx, conn, ConfigMessages["support"])
+	if err := conn.GetConfig(ConfigMessages["support"]); err != nil {
+		return Support{}, err
+	}
+	m, err := awaitMessage(ctx, conn, ConfigMessages["support"])
 	if err != nil {
 		return Support{}, err
 	}
-	if len(x) == 0 {
+	status := m.Header.Status()
+	if len(m.XML) == 0 && len(m.Payload) == 0 {
 		if status == StatusNotImplemented {
 			return Support{}, fmt.Errorf("baichuan: this camera does not answer the support read")
 		}
 		return Support{}, fmt.Errorf("baichuan: support read answered status %d with no body", status)
 	}
-	return ParseSupport(x)
+	return parseSupportReply(m)
+}
+
+// parseSupportReply reads the support document from whichever layout the
+// reply turns out to use. Every camera here sends it as the XML section
+// alone; an E1 Zoom (IPC_515SD6, v3.0.0.2356) answered with a document cut
+// off after three lines, so a payload section is tried as well, on its own
+// and joined to the XML section. When none parse, the error describes the
+// reply's shape, which is what a report from a camera we do not have needs
+// to carry.
+func parseSupportReply(m Message) (Support, error) {
+	s, err := ParseSupport(m.XML)
+	if err == nil {
+		return s, nil
+	}
+	for _, alt := range [][]byte{m.PayloadXML, m.WholeXML} {
+		if len(alt) == 0 {
+			continue
+		}
+		if s, altErr := ParseSupport(alt); altErr == nil {
+			return s, nil
+		}
+	}
+	return Support{}, fmt.Errorf("%w (status %d, class %#04x, body %d bytes, payload offset %d, payload %d bytes, starts %q)",
+		err, m.Header.Status(), m.Header.Class, m.Header.MsgLen, m.Header.PayloadOff, len(m.Payload), head(m.XML, 120))
+}
+
+// head returns up to n bytes of b with newlines flattened, for an error.
+func head(b []byte, n int) string {
+	if len(b) > n {
+		b = b[:n]
+	}
+	return strings.Join(strings.Fields(string(b)), " ")
 }
 
 // GetAbilities reads what the logged in user may do, module by module

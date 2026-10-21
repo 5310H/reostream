@@ -43,6 +43,17 @@ type Message struct {
 	// none. Any bytes between the packet's declared end and the end of its
 	// final message are filler and must be discarded.
 	StartsPacket bool
+
+	// PayloadXML and WholeXML are the other two ways a config reply that
+	// came with a payload section can be read, filled only for messages
+	// that are not video. PayloadXML is the payload decrypted on its own,
+	// the layout neolink parses: an extension, then the document as a
+	// separately encrypted payload. WholeXML is the entire body decrypted
+	// as one, for a camera whose PayloadOff falls inside the document. No
+	// camera here sends either, so they exist for a caller to fall back on
+	// when XML does not parse, and to describe the reply when none do.
+	PayloadXML []byte
+	WholeXML   []byte
 }
 
 // Reader reads framed messages from a stream.
@@ -120,6 +131,10 @@ func (r *Reader) Next() (Message, error) {
 	m.XML = r.decrypt(h, body[:xmlEnd])
 	if xmlEnd < len(body) {
 		m.Payload = body[xmlEnd:]
+		if h.MsgID != MsgIDVideo {
+			m.PayloadXML = r.decrypt(h, body[xmlEnd:])
+			m.WholeXML = r.decrypt(h, body)
+		}
 		ext, ok := parseExtension(m.XML)
 		// An extension header is not by itself a packet boundary. Most
 		// cameras send one only on the message that begins a packet and
