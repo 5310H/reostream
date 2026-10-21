@@ -430,7 +430,9 @@ type claimPage struct {
 // Fresh every time, deliberately. Keeping one to re-show after a refusal
 // would mean storing a password the operator has not chosen, which is the
 // thing this must not do -- and it would give an attacker a value to
-// correlate across requests. A rand failure gives an empty suggestion
+// correlate across requests. The page's own script puts back what the
+// operator sent, from the tab's sessionStorage, so a refusal does not swap
+// out a password they already copied. A rand failure gives an empty suggestion
 // rather than an error page: the form still works, it is just not filled
 // in.
 func claimFormPage(errMsg string) claimPage {
@@ -550,7 +552,7 @@ func (s *Server) serveClaim(w http.ResponseWriter, r *http.Request) {
 	// docker-proxy the passer-by and the operator are the same key.
 	if !claimTokenMatches(s.claimToken(), r.FormValue("token")) {
 		w.WriteHeader(http.StatusForbidden)
-		s.render(w, "claim.html", claimFormPage("That is not the token this reostream printed. It is in the daemon's own log -- `docker logs` on the container, or journalctl on the service -- in a line that begins \"reostream: not yet claimed\". Copy it from there."))
+		s.render(w, "claim.html", claimFormPage("That is not the token this reostream printed. It is in the daemon's own log -- `docker logs` on the container, or journalctl on the service -- a few lines below \"reostream: not yet claimed\". Copy it from there."))
 		return
 	}
 

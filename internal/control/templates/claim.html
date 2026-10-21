@@ -24,7 +24,7 @@
 <summary aria-label="Where do I find the token?">?</summary>
 <span class="popover">
 <span class="below">reostream printed it once, in its own log:</span>
-<code>$ docker compose logs | grep "not yet claimed"<br>reostream: not yet claimed, token XXXX-XXXX-XXXX-XXXX</code>
+<code>$ docker logs reostream 2>&1 | grep -A4 "not yet claimed"<br>reostream: not yet claimed. To claim this install, open<br>&nbsp;&nbsp;http://&lt;host&gt;:8562/claim<br>and enter this token:<br><br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;XXXX-XXXX-XXXX-XXXX</code>
 </span>
 </details>
 </span>
@@ -55,6 +55,20 @@
 {{end}}
 </div>
 <script>
+(function () {
+  // A refusal renders a new suggestion. Put back the password this tab
+  // sent, so one the operator already copied is not silently replaced.
+  var form = document.querySelector('form[action="/claim"]');
+  var field = document.querySelector('input[name=password]');
+  var key = 'reostream-claim-password';
+  if (!form || !field) return;
+  try {
+    var kept = sessionStorage.getItem(key);
+    if (kept && document.querySelector('.outcome-refused')) field.value = kept;
+    else sessionStorage.removeItem(key);
+    form.addEventListener('submit', function () { sessionStorage.setItem(key, field.value); });
+  } catch (e) {}
+})();
 (function () {
   var btn = document.getElementById('copy-password');
   if (!btn) return;
