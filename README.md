@@ -46,7 +46,7 @@ docker logs reostream
 
 Your streams are at `rtsp://<host>:8561/<camera>` and `http://<host>:8560/<camera>.ts`.
 
-Prefer compose, a plain binary or systemd? See `docs/setup.md`.
+Prefer compose, Unraid, a plain binary or systemd? See `docs/setup.md`.
 
 ![Status page](docs/images/status.png)
 

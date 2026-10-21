@@ -10,6 +10,7 @@ The README's Quickstart is enough for most installs. This page covers everything
 | `docker compose up` | Same image, using `docker-compose.yml` from this repo. |
 | Static binary | No Docker. linux/amd64 and linux/arm64 on every release. |
 | systemd | Plain Linux host, with `contrib/reostream.service`. |
+| Unraid | Template in `contrib/unraid/`, see below. |
 | Build from source | Go 1.26, `go build ./cmd/reostream`. |
 
 ### Static binary
@@ -38,6 +39,19 @@ connections for several minutes.
   `chown -R 65532:65532 ./data` before the first run, or the claim fails to save.
 - Mount the whole data directory, not just `config.toml`. Saves are written to a temp
   file and renamed, which needs the directory to be writable.
+
+### Unraid
+
+Until it is in Community Apps, add the template by hand. In the Unraid terminal:
+
+```
+mkdir -p /mnt/user/appdata/reostream && chown 65532:65532 /mnt/user/appdata/reostream
+wget -O /boot/config/plugins/dockerMan/templates-user/my-reostream.xml \
+  https://raw.githubusercontent.com/VoltTech21/reostream/main/contrib/unraid/reostream.xml
+```
+
+Then Docker > Add Container, pick `reostream` from the template list, and Apply.
+The claim token is in the container's log (Docker tab, click the icon, Logs).
 
 ## Claiming
 
