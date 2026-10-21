@@ -325,6 +325,9 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 		msg := firstRunMessage(configPath, shown, claimToken)
 		firstRunMsg = msg
 		printFirstRun(msg)
+		if err := control.DataDirWritable(filepath.Dir(configPath)); err != nil {
+			log.Printf("reostream: WARNING: the claim will fail: %v", err)
+		}
 		go firstRunLoop(supCtx, configPath, msg)
 	}
 

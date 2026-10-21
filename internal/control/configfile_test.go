@@ -309,6 +309,36 @@ func TestSaveConfigReportsOwnershipMismatchWhenTheFileItselfIsUnwritable(t *test
 	}
 }
 
+func TestFirstSaveIntoAnUnwritableDirectoryNamesTheFix(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permission bits")
+	}
+
+	// A host folder Docker or Unraid created for the bind mount: it
+	// exists, it is empty, and only root can write it. The first save
+	// must say chown, not "no such file or directory".
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	path := filepath.Join(dir, "config.toml")
+
+	err := saveConfig(path, validTOML, nil)
+	if err == nil {
+		t.Fatal("expected the unwritable directory to surface an error")
+	}
+	if !strings.Contains(err.Error(), "chown") || strings.Contains(err.Error(), "no such file") {
+		t.Fatalf("error %q does not name the fix", err)
+	}
+	if err := DataDirWritable(dir); err == nil || !strings.Contains(err.Error(), "chown") {
+		t.Fatalf("DataDirWritable = %v, want the same chown advice", err)
+	}
+	if err := DataDirWritable(t.TempDir()); err != nil {
+		t.Fatalf("DataDirWritable on a writable directory = %v", err)
+	}
+}
+
 func TestSaveConfigDoesNotFallBackOnAnUnrelatedRenameError(t *testing.T) {
 	old := renameConfig
 	renameConfig = func(oldpath, newpath string) error {

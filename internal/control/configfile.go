@@ -60,6 +60,28 @@ func controlListen(c *config.Config) string {
 	return c.Control.Listen
 }
 
+// DataDirWritable reports whether the daemon can create files in dir,
+// which the first save (the claim) needs. A bind mount to a host folder
+// made by Docker or Unraid is owned by root, and this daemon runs as
+// nonroot, so this is the usual first-run failure; startup calls it to
+// warn before anyone gets as far as the claim page.
+func DataDirWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".reostream-probe-*")
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return dirNotWritable(dir)
+		}
+		return err
+	}
+	f.Close()
+	return os.Remove(f.Name())
+}
+
+func dirNotWritable(dir string) error {
+	uid := os.Getuid()
+	return fmt.Errorf("reostream cannot write to %s: it runs as uid %d and the folder is not writable by that user. On the host, run chown -R %d:%d on the folder mounted at %s, then try again", dir, uid, uid, uid, dir)
+}
+
 // renameConfig is os.Rename, kept as a variable so a test can force the
 // bind-mount fallback path below without needing a real single-file bind
 // mount, which cannot be created in a test.
@@ -103,6 +125,12 @@ func saveConfig(path, text string, checkFleet func([]config.Camera) error) error
 	if err != nil {
 		if !errors.Is(err, os.ErrPermission) {
 			return err
+		}
+		// With no file there yet, the in-place fallback below has nothing
+		// to write into either, and its error would be a bare "no such
+		// file", which is not the problem. The problem is the directory.
+		if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
+			return dirNotWritable(dir)
 		}
 		sameFS = false
 		tmp, err = os.CreateTemp("", ".reostream-config-*")
