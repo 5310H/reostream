@@ -168,9 +168,12 @@ default; UDP is offered, but a lost packet is a corrupt frame.
 
 ### Two-way audio
 
-On a camera with a speaker, each RTSP stream also offers an ONVIF back channel, so
-Frigate's talk button works through go2rtc with no extra config. Only clients that ask
-for a back channel see it; ffmpeg and other players get the same streams as before.
+On a camera with a speaker, each RTSP stream also offers a back channel (the RTSP
+extension ONVIF defines for two-way audio), so Frigate's talk button works through go2rtc
+with no extra config: no third stream, and nothing in Frigate's `onvif:` section, which is
+for PTZ and autotracking and unrelated to this. Talk needs Frigate's WebRTC live view, as
+it does for any camera. Only clients that ask for a back channel see it; ffmpeg and other
+players get the same streams as before.
 
 reostream checks the camera's own hardware report before offering it. A camera without
 a speaker never gets a back channel, because one that is sent a talk session anyway
