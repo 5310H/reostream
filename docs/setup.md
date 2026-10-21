@@ -49,6 +49,25 @@ The claim page fills in a random 16 character password. Keep it unless you have 
 not to; a password you type must be at least 16 characters. Submitting writes
 `/data/config.toml` and the page asks for that password from then on.
 
+### Lost the password
+
+The password is the `password` line under `[control]` in `/data/config.toml`. Change it
+there, then restart. With the default named volume:
+
+```sh
+docker run --rm -it -v reostream-data:/data alpine vi /data/config.toml
+docker restart reostream
+```
+
+Only change the line under `[control]`; the ones under `[[camera]]` are camera logins.
+With no cameras added yet, it is simpler to start over:
+
+```sh
+docker rm -f reostream && docker volume rm reostream-data
+```
+
+then run it again and claim with the new token.
+
 ## Config file
 
 Cameras can be added from the page or by editing `/data/config.toml`. When editing by
