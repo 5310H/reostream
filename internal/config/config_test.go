@@ -308,3 +308,38 @@ func TestChannelLoadsFromTheFile(t *testing.T) {
 		t.Fatalf("channel = %d, want 3", cfg.Cameras[0].Channel)
 	}
 }
+
+// A whole camera from the environment, as a Kubernetes Secret supplies it
+// (issue #4): the docs promise "$NAME" works for any value, and an address
+// or username left as a literal "$NAME" is dialed as a hostname.
+func TestCameraAddressAndUsernameComeFromTheEnvironment(t *testing.T) {
+	t.Setenv("CAM_ADDR", "10.0.4.5")
+	t.Setenv("CAM_USER", "stream")
+	t.Setenv("CAM_PASS", "pw")
+	path := filepath.Join(t.TempDir(), "config.toml")
+	text := "[[camera]]\nname = \"backyard\"\naddress = \"$CAM_ADDR\"\nusername = \"$CAM_USER\"\npassword = \"$CAM_PASS\"\nstreams = [\"main\"]\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := cfg.Cameras[0]
+	if c.Address != "10.0.4.5" || c.Username != "stream" || c.Password != "pw" {
+		t.Fatalf("got %q %q %q", c.Address, c.Username, c.Password)
+	}
+
+	raw, err := LoadRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Cameras[0].Address != "$CAM_ADDR" {
+		t.Fatalf("LoadRaw resolved the address to %q", raw.Cameras[0].Address)
+	}
+
+	os.Unsetenv("CAM_ADDR")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "address") {
+		t.Fatalf("unset address variable: %v", err)
+	}
+}

@@ -85,8 +85,9 @@ var validStreamNames = map[string]bool{
 	"extern": true,
 }
 
-// Load reads and validates the config file at path. A password value that
-// starts with "$" is resolved from the named environment variable rather
+// Load reads and validates the config file at path. A camera address,
+// username or password, or the control password, that starts with "$" is
+// resolved from the named environment variable rather
 // than stored in the file; an unset variable is an error rather than an
 // empty password, because a camera that silently never authenticates is
 // much harder to notice than a process that refuses to start.
@@ -108,16 +109,28 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: %s: unknown key(s): %s", path, strings.Join(keys, ", "))
 	}
 
+	// Address, username and password all take "$NAME", so a camera can be
+	// configured entirely from the environment (a Kubernetes Secret, say)
+	// with nothing site specific left in the file itself.
 	for i, cam := range cfg.Cameras {
-		if !strings.HasPrefix(cam.Password, "$") {
-			continue
+		for _, f := range []struct {
+			key string
+			v   *string
+		}{
+			{"address", &cfg.Cameras[i].Address},
+			{"username", &cfg.Cameras[i].Username},
+			{"password", &cfg.Cameras[i].Password},
+		} {
+			if !strings.HasPrefix(*f.v, "$") {
+				continue
+			}
+			name := strings.TrimPrefix(*f.v, "$")
+			val, ok := os.LookupEnv(name)
+			if !ok {
+				return nil, fmt.Errorf("config: %s: camera %q: %s: environment variable %s is not set", path, cam.Name, f.key, name)
+			}
+			*f.v = val
 		}
-		name := strings.TrimPrefix(cam.Password, "$")
-		val, ok := os.LookupEnv(name)
-		if !ok {
-			return nil, fmt.Errorf("config: %s: camera %q: environment variable %s is not set", path, cam.Name, name)
-		}
-		cfg.Cameras[i].Password = val
 	}
 
 	if cfg.Control != nil && strings.HasPrefix(cfg.Control.Password, "$") {

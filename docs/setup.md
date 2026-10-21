@@ -37,6 +37,10 @@ connections for several minutes.
 - The container runs as uid 65532. A named volume (as in `docker-compose.yml`) just works.
   A bind mount to a host directory must be writable by that user:
   `chown -R 65532:65532 ./data` before the first run, or the claim fails to save.
+- Camera hostnames are resolved with the DNS server Docker gives the container. If your
+  host uses a local resolver (systemd-resolved's 127.0.0.53, for one), Docker falls back to
+  8.8.8.8 and local names will not resolve: pass `--dns <your DNS server>`, use
+  `--network host`, or put IP addresses in the config.
 - Mount the whole data directory, not just `config.toml`. Saves are written to a temp
   file and renamed, which needs the directory to be writable.
 
@@ -107,7 +111,7 @@ streams = ["main", "sub"]
 rtsp = ["main", "sub"]
 ```
 
-- A value starting with `$` is read from that environment variable.
+- A camera's `address`, `username` or `password`, or the control `password`, starting with `$` is read from that environment variable. A variable that is not set stops startup with an error.
 - Unknown keys are an error at startup, so a typo fails at boot instead of serving 404s.
 - Saving from the page validates first and reloads only the cameras that changed.
 
