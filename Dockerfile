@@ -27,6 +27,9 @@ ARG TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
+# go.mod replaces gortsplib with the patched copy here, which go mod download
+# needs in place before it runs. See third_party/gortsplib/REOSTREAM.md.
+COPY third_party ./third_party
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal

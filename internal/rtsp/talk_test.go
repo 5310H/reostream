@@ -1,7 +1,13 @@
 package rtsp
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -201,5 +207,73 @@ func TestPlainClientsSeeNoBackChannel(t *testing.T) {
 		if m.IsBackChannel {
 			t.Fatal("back channel offered to a client that did not ask for one")
 		}
+	}
+}
+
+// go2rtc repeats the back channel's SETUP when two of its consumers start
+// talking at once, and on a refusal it drops the back channel until it
+// restarts. A repeated SETUP must get the transport it already has.
+func TestRepeatedBackChannelSetupIsAccepted(t *testing.T) {
+	frames := captureFrames(t)
+	srv, st := serverWithStream(t, "cam")
+	st.SetTalker(&fakeTalker{})
+	st.SetSpeaker(true)
+	feedUntilReady(t, st, frames)
+
+	conn, err := net.Dial("tcp", srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	cseq := 0
+	send := func(method, url string, hdr ...string) (int, string) {
+		cseq++
+		msg := fmt.Sprintf("%s %s RTSP/1.0\r\nCSeq: %d\r\n", method, url, cseq)
+		for _, h := range hdr {
+			msg += h + "\r\n"
+		}
+		if _, err := conn.Write([]byte(msg + "\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		status, head := 0, ""
+		length := 0
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break
+			}
+			if status == 0 {
+				fmt.Sscanf(line, "RTSP/1.0 %d", &status)
+			}
+			if v, ok := strings.CutPrefix(line, "Content-Length: "); ok {
+				length, _ = strconv.Atoi(v)
+			}
+			if strings.HasPrefix(line, "Session: ") {
+				head = strings.SplitN(strings.TrimPrefix(line, "Session: "), ";", 2)[0]
+			}
+		}
+		io.CopyN(io.Discard, r, int64(length))
+		return status, head
+	}
+
+	base := "rtsp://" + srv.Addr() + "/cam"
+	if s, _ := send("DESCRIBE", base, "Accept: application/sdp", "Require: www.onvif.org/ver20/backchannel"); s != 200 {
+		t.Fatalf("DESCRIBE %d", s)
+	}
+	s, sess := send("SETUP", base+"/trackID=0", "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
+	if s != 200 || sess == "" {
+		t.Fatalf("SETUP video %d", s)
+	}
+	back := base + "/trackID=2"
+	if s, _ := send("SETUP", back, "Transport: RTP/AVP/TCP;unicast;interleaved=4-5", "Session: "+sess); s != 200 {
+		t.Fatalf("SETUP back channel %d", s)
+	}
+	if s, _ := send("SETUP", back, "Transport: RTP/AVP/TCP;unicast;interleaved=4-5", "Session: "+sess); s != 200 {
+		t.Fatalf("repeated SETUP of the back channel answered %d, want 200", s)
 	}
 }
