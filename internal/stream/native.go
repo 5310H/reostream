@@ -20,17 +20,17 @@ import (
 	"github.com/VoltTech21/reostream/internal/ts"
 )
 
-// nativePaths are the streams a camera only serves over its own RTSP
-// server. The TrackMix's zoom lens is the one: its second channel answers
-// a Baichuan video request with a session that never sends anything
-// (every request shape was tried, on a TrackMix PoE and Wi-Fi), while the
-// camera's RTSP server serves it as Preview_02_main, 1920x1080 H.264.
+// nativePaths are the streams a camera also serves over its own RTSP
+// server. The TrackMix's zoom lens is the one, as Preview_02_main (1920x1080
+// H.264). Run fetches it over Baichuan (see zoomChannel in stream.go); this
+// path is the fallback for a camera whose zoom never sends video that way.
 var nativePaths = map[string]string{
 	"zoom": "Preview_02_main",
 }
 
 // nativeRTSPPort is where Reolink cameras serve RTSP. reostream turns the
-// service on when it adds a camera (baichuan.EnableServices).
+// service on when it adds a camera (baichuan.EnableServices), which keeps
+// this fallback available.
 var nativeRTSPPort = "554"
 
 // runNative pulls one stream from the camera's own RTSP server and

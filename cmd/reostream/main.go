@@ -74,6 +74,7 @@ func main() {
 	listenOverride := flag.String("listen", "", "HTTP listen address, overriding the config file's")
 	rtspListenOverride := flag.String("rtsp-listen", "", "RTSP listen address, overriding the config file's [rtsp].listen; turns RTSP on if the config has no [rtsp] section")
 	controlListenOverride := flag.String("control-listen", "", "address for the page, overriding the config file's [control].listen. Symmetric with -listen; mostly useful for moving the page off 8562 without editing the config")
+	saveListen := flag.Bool("save-listen", false, "write the -listen, -rtsp-listen and -control-listen addresses given on this command line into the existing config file, so later starts without them keep them. Off by default: without it the flags only override the file for this run")
 	streamBase := flag.String("stream-base", "", "browser reachable base URL for live tiles, for example http://192.0.2.10:8560 (empty means the control page's own same-origin /stream/ mount, which is the right default; only set this to point tiles at a different listener)")
 	flag.Parse()
 
@@ -81,6 +82,9 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reostream: %v\n", err)
 		os.Exit(1)
+	}
+	if *saveListen {
+		saveListenFlags(resolveConfigPath(*dataDir, *configFlag), *listenOverride, *rtspListenOverride, *controlListenOverride)
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -256,6 +260,12 @@ func startup(configFlag, dataDir, listenOverride, rtspListenOverride, controlLis
 		}
 		rs := rtspSrv.Add(path)
 		rs.SetTalker(cameraTalker{name: camera, sup: sup})
+		// hold_picture (#13): a battery camera has its presence stream
+		// for this instead.
+		go rs.Hold(supCtx, func() bool {
+			c, ok := sup.CameraConfig(camera)
+			return ok && c.HoldPicture && c.UID == ""
+		})
 		return multiSink{rs, fs}
 	})
 	// Battery cameras' last pictures live next to the config, so a restart
@@ -640,4 +650,21 @@ func rtspListenFor(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.RTSP.Listen
+}
+
+// saveListenFlags is -save-listen. It runs after startup, so only addresses
+// the daemon is already listening on are written. A fresh install has no
+// file to update yet: claiming it writes the addresses (see claimConfigText).
+func saveListenFlags(path, listen, rtspListen, controlListen string) {
+	changed, err := control.SaveListenFlags(path, listen, rtspListen, controlListen)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		log.Printf("reostream: -save-listen: no config file yet; claiming this install will save the addresses")
+	case err != nil:
+		log.Printf("reostream: -save-listen: %v", err)
+	case len(changed) == 0:
+		log.Printf("reostream: -save-listen: %s already has these addresses", path)
+	default:
+		log.Printf("reostream: -save-listen: saved to %s: %s", path, strings.Join(changed, ", "))
+	}
 }

@@ -205,6 +205,8 @@ func newEntry(cam config.Camera, st string) *entry {
 			Stream:   st,
 			Channel:  cam.Channel,
 			UID:      cam.UID,
+
+			HoldPicture: cam.HoldPicture,
 		},
 		h:        h,
 		stat:     StreamStat{Camera: cam.Name, Stream: st, OnDemand: onDemand},

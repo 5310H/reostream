@@ -38,6 +38,27 @@ func TestDepacketiserEmitsAnIFrame(t *testing.T) {
 	}
 }
 
+// The TrackMix zoom lens is channel 1, and its video packets say so in the
+// magic's first digit: "10dc" for an I frame, "11dc" for a P frame.
+func TestDepacketiserReadsChannelOneVideo(t *testing.T) {
+	d := NewDepacketiser()
+	for _, want := range []struct {
+		magic string
+		hdr   int
+		kind  FrameKind
+		data  string
+	}{{"10dc", 32, FrameIFrame, "zoomkey"}, {"11dc", 24, FramePFrame, "zoomdelta"}} {
+		d.Write(buildFrame([]byte(want.magic), want.hdr, "H264", 1, []byte(want.data)), true)
+		f, ok := d.Next()
+		if !ok {
+			t.Fatalf("no %v emitted", want.kind)
+		}
+		if f.Kind != want.kind || f.Codec != "H264" || string(f.Data) != want.data {
+			t.Errorf("got %v %q %q, want %v H264 %q", f.Kind, f.Codec, f.Data, want.kind, want.data)
+		}
+	}
+}
+
 // A media packet may straddle message boundaries.
 func TestDepacketiserWaitsForASplitFrame(t *testing.T) {
 	payload := make([]byte, 5000)

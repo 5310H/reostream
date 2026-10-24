@@ -57,7 +57,7 @@ type camIdent struct {
 	HasSD    bool
 	Model    string
 	Firmware string
-	// Zoom is a second lens served over the camera's own RTSP (TrackMix).
+	// Zoom is a second lens (TrackMix), over Baichuan or the camera's RTSP.
 	Zoom bool
 	at   time.Time
 }
@@ -117,8 +117,8 @@ func (s *Server) identFor(ctx context.Context, cam Camera) camIdent {
 	// battery camera does not answer it at all.
 	id.HasSD = id.Support != nil && (id.Support.Support.DiskNum > 0 || id.Support.Support.Record > 0)
 	if cam.UID == "" && cam.Channel == 0 {
-		zctx, zcancel := context.WithTimeout(ctx, 4*time.Second)
-		_, _, _, zerr := stream.NativeInfo(zctx, cam.Address, cam.Username, cam.Password, "zoom")
+		zctx, zcancel := context.WithTimeout(ctx, 8*time.Second)
+		_, _, _, zerr := stream.ZoomInfo(zctx, cam.Address, cam.Username, cam.Password)
 		zcancel()
 		id.Zoom = zerr == nil
 	}

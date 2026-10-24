@@ -58,6 +58,10 @@ type Conn struct {
 	stream string
 	handle int
 
+	// also are the streams StartVideoOn opened beside the one StartVideo
+	// did, so Close can stop each of them too.
+	also []alsoStream
+
 	// deviceInfo is the raw <DeviceInfo> document the camera sends as its
 	// login reply on success (docs/protocol.md's handshake table, message
 	// 4). login() populates it before Dial returns; every other read in
@@ -325,6 +329,40 @@ func (c *Conn) StartVideo(stream string) error {
 	return c.w.Write(h, body)
 }
 
+type alsoStream struct {
+	channel, handle int
+	stream          string
+}
+
+// StartVideoOn requests a stream on any channel of this connection, with an
+// explicit handle, beside whatever StartVideo asked for. The camera echoes a
+// request's encryption offset on every media message it sends for it, and
+// the offset's low byte is the channel, so a caller running two streams on
+// one connection tells them apart by byte(Header.EncOffset).
+//
+// It exists for the TrackMix zoom lens: channel 1 answers a request made on
+// its own with a stream info frame and audio but never any video, and sends
+// video only on a connection that is also streaming channel 0 (the Reolink
+// app opens both on one connection; captured 2026-10-24).
+func (c *Conn) StartVideoOn(channel, handle int, stream string) error {
+	body, err := previewXML(channel, handle, stream)
+	if err != nil {
+		return err
+	}
+	h := Header{
+		MsgID:     MsgIDVideo,
+		Class:     ClassModern24,
+		EncOffset: EncOffsetFor(byte(channel), StreamID(stream), c.nextCounter(), 0),
+	}
+	if err := c.w.Write(h, body); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.also = append(c.also, alsoStream{channel, handle, stream})
+	c.mu.Unlock()
+	return nil
+}
+
 // TalkAbility asks the camera to describe its two-way audio support: the
 // duplex modes, the stream modes and the audio encodings it will accept.
 // The reply arrives on Messages as MsgIDTalkAbility.
@@ -564,6 +602,20 @@ func (c *Conn) Close() error {
 					Class: ClassModern24,
 					EncOffset: EncOffsetFor(byte(c.opts.Channel),
 						StreamID(c.stream), c.nextCounter(), 0),
+				}
+				_ = c.nc.SetWriteDeadline(time.Now().Add(2 * time.Second))
+				_ = c.w.Write(h, body)
+			}
+		}
+		c.mu.Lock()
+		also := c.also
+		c.mu.Unlock()
+		for _, a := range also {
+			if body, mErr := previewXML(a.channel, a.handle, ""); mErr == nil {
+				h := Header{
+					MsgID:     MsgIDVideo,
+					Class:     ClassModern24,
+					EncOffset: EncOffsetFor(byte(a.channel), StreamID(a.stream), c.nextCounter(), 0),
 				}
 				_ = c.nc.SetWriteDeadline(time.Now().Add(2 * time.Second))
 				_ = c.w.Write(h, body)

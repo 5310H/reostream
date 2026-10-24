@@ -181,8 +181,26 @@ On by default at port 8561 (not 8554, which go2rtc uses). A camera's `rtsp` list
 which of its streams are served; cameras added from the page serve all of them. Remove
 the `[rtsp]` section to turn it off.
 
-Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`. TCP interleaved is the
-default; UDP is offered, but a lost packet is a corrupt frame.
+Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`, plus `<cam>_zoom` for a
+TrackMix's zoom lens. TCP interleaved is the default; UDP is offered, but a lost packet is
+a corrupt frame.
+
+### Holding the last picture
+
+A camera in privacy mode (the E1 series) stops sending video, and Frigate's ffmpeg keeps
+restarting with "crashed unexpectedly" until it comes back. With `hold_picture = true` on
+the camera, its RTSP streams keep showing the last picture, once a second, until live video
+returns:
+
+```toml
+[[camera]]
+name = "nursery"
+# ...
+hold_picture = true
+```
+
+It is off by default, because a frozen picture also hides a real outage. The control page
+still shows the camera as disconnected while it holds.
 
 ### Two-way audio
 
@@ -277,4 +295,31 @@ password = "$BACKYARD_PW"
   the camera's first file arrives. Motion goes off 30 seconds after its last file.
 - Listing `streams` on a battery camera streams it all the time. Only do that on one with
   constant power.
+
+### Battery cameras in Frigate
+
+`rtsp://host:8561/<camera>` is a battery camera's presence stream: its last picture once a
+second, each motion clip played in as it arrives, and live video while someone watches it
+on the control page. It never wakes the camera, so a recorder can hold it open around the
+clock. Point Frigate at it with detection off, and add `-fpsprobesize 0` to the input:
+at one frame a second, ffmpeg otherwise spends 20 seconds measuring the frame rate before
+it outputs anything, Frigate gives up at 20 seconds, and the camera never records.
+
+```yaml
+go2rtc:
+  streams:
+    backyard: rtsp://<reostream-IP>:8561/backyard
+cameras:
+  backyard:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/backyard
+          input_args: -rtsp_transport tcp -timeout 10000000 -fpsprobesize 0
+          roles: [detect, record]
+    detect:
+      enabled: false
+    record:
+      continuous:
+        days: 7
+```
 

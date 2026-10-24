@@ -34,6 +34,12 @@ type Camera struct {
 	// RTSP names which of this camera's streams to serve over RTSP. Absent
 	// means none, and every stream still reaches the HTTP output either way.
 	RTSP []string
+
+	// HoldPicture keeps this camera's RTSP streams showing the last picture
+	// while the camera sends no video (privacy mode, a dropout), instead of
+	// going silent, so a recorder's ffmpeg is not restarted over and over
+	// (#13). Off by default: a frozen picture also hides a real outage.
+	HoldPicture bool `toml:"hold_picture"`
 }
 
 // RTSPConfig configures the RTSP listener. Its absence turns RTSP off

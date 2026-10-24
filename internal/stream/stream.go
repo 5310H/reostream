@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
@@ -98,6 +99,9 @@ type Config struct {
 	Channel  int    // the camera's channel on a hub or NVR; 0 on its own
 	UID      string // a battery camera's UID; empty for one on TCP
 
+	// HoldPicture is the camera's hold_picture setting (see config.Camera).
+	HoldPicture bool
+
 	// IdleTimeout overrides baichuan.DefaultIdleTimeout. A battery camera
 	// that is awake sends within a couple of seconds, so one that does not
 	// is holding a session and is quicker to retry than to wait out.
@@ -157,11 +161,15 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	// are cumulative counters meant to survive a reconnect, not a rate.
 	defer h.MarkDisconnected()
 
-	if path, ok := nativePaths[cfg.Stream]; ok {
+	zoom := cfg.Stream == "zoom"
+	if path, ok := nativePaths[cfg.Stream]; ok && (!zoom || zoomOverRTSP(cfg.Name)) {
 		return runNative(ctx, cfg, h, path)
 	}
 
 	kind, ok := streamKind(cfg.Stream)
+	if zoom {
+		kind, ok = baichuan.StreamMain, true
+	}
 	if !ok {
 		return fmt.Errorf("stream: %s: unknown stream %q", cfg.Name, cfg.Stream)
 	}
@@ -209,9 +217,14 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 		}
 	}
 
-	if err := conn.StartVideo(kind); err != nil {
+	if zoom {
+		if err := startZoom(conn); err != nil {
+			return fmt.Errorf("stream: %s: start video: %w", cfg.Name, err)
+		}
+	} else if err := conn.StartVideo(kind); err != nil {
 		return fmt.Errorf("stream: %s: start video: %w", cfg.Name, err)
 	}
+	gotVideo := false
 
 	mediaTimeout := cfg.MediaTimeout
 	if mediaTimeout <= 0 {
@@ -249,6 +262,11 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 				}
 				return fmt.Errorf("stream: %s: camera closed the connection", cfg.Name)
 			}
+			if zoom && msg.Header.MsgID == baichuan.MsgIDVideo && byte(msg.Header.EncOffset) != zoomChannel {
+				// The channel 0 sub stream that unlocks the zoom: wanted
+				// only for that, so its media goes nowhere.
+				continue
+			}
 			if len(msg.Payload) > 0 {
 				d.Write(msg.Payload, msg.StartsPacket)
 				for {
@@ -270,6 +288,7 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 						// behind a watchdog that looks satisfied while
 						// still delivering an unusable stream.
 						lastMedia = time.Now()
+						gotVideo = true
 						if mux == nil {
 							// The video codec is not known until the first
 							// frame arrives, so the muxer is built here
@@ -382,6 +401,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 			// there sooner. See DefaultMediaTimeout for why the two do not
 			// need to race each other.
 			if now.Sub(lastMedia) >= mediaTimeout {
+				if zoom && !gotVideo {
+					useZoomOverRTSP(cfg.Name)
+				}
 				return fmt.Errorf("stream: %s: no video frame in %s: camera is answering but not sending media (held session)", cfg.Name, mediaTimeout)
 			}
 		}
@@ -406,4 +428,40 @@ func shouldPing(last, now time.Time, every time.Duration) bool {
 // it does not count here.
 func droppedEarlyAudio(kind baichuan.FrameKind) bool {
 	return kind == baichuan.FrameADPCM
+}
+
+// zoomChannel is the TrackMix zoom lens's channel. The camera sends its
+// video only on a connection that is also streaming channel 0 (asked for
+// alone, channel 1 answers with a stream info frame and audio and nothing
+// else), so a zoom stream opens channel 0's sub stream first, the cheapest
+// one, and drops it. This is how the Reolink app asks (captured 2026-10-24):
+// channel 0 sub on handle 256, channel 1 main on handle 1.
+const zoomChannel = 1
+
+func startZoom(conn *baichuan.Conn) error {
+	if err := conn.StartVideoOn(0, 256, baichuan.StreamSub); err != nil {
+		return err
+	}
+	return conn.StartVideoOn(zoomChannel, zoomChannel, baichuan.StreamMain)
+}
+
+// zoomRTSP records cameras whose zoom never sent video over Baichuan, so
+// later attempts use the camera's own RTSP instead (runNative) for the rest
+// of this process's life.
+var (
+	zoomRTSPMu sync.Mutex
+	zoomRTSP   = map[string]bool{}
+)
+
+func zoomOverRTSP(name string) bool {
+	zoomRTSPMu.Lock()
+	defer zoomRTSPMu.Unlock()
+	return zoomRTSP[name]
+}
+
+func useZoomOverRTSP(name string) {
+	zoomRTSPMu.Lock()
+	zoomRTSP[name] = true
+	zoomRTSPMu.Unlock()
+	log.Printf("stream: %s: the zoom lens sent no video over Baichuan; using the camera's RTSP from now on", name)
 }

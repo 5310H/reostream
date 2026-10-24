@@ -353,6 +353,14 @@ func searchPrefix(buf []byte, hdr int, codec string, kind FrameKind) int {
 	return prefix
 }
 
+// isVideoMagic reports a video packet: "00dc" for an I frame and "01dc"
+// for a P frame, where the first digit is the channel. Channel 0 is every
+// camera's only picture; the TrackMix zoom lens, channel 1, sends "10dc"
+// and "11dc" (captured 2026-10-24).
+func isVideoMagic(b []byte) bool {
+	return len(b) >= 4 && b[0] >= '0' && b[0] <= '9' && (b[1] == '0' || b[1] == '1') && b[2] == 'd' && b[3] == 'c'
+}
+
 func match(b, magic []byte) bool {
 	return len(b) >= 4 && b[0] == magic[0] && b[1] == magic[1] &&
 		b[2] == magic[2] && b[3] == magic[3]
@@ -365,11 +373,11 @@ func (d *Depacketiser) Next() (Frame, bool) {
 			return Frame{}, false
 		}
 		switch {
-		case match(d.buf, magicIFrame), match(d.buf, magicPFrame):
+		case isVideoMagic(d.buf):
 			// magic(4) type(4) size(4) unknown(4) micros(4) unknown(4),
 			// and for I frames a further time_t(4) and unknown(4).
 			hdr, kind := 24, FramePFrame
-			if match(d.buf, magicIFrame) {
+			if d.buf[1] == '0' {
 				hdr, kind = 32, FrameIFrame
 			}
 			if len(d.buf) < hdr {

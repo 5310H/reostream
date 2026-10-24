@@ -8,6 +8,7 @@ package rtsp
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -118,6 +119,13 @@ type Stream struct {
 	talker  Talker
 	speaker bool
 	back    *description.Media
+
+	// The last real keyframe and when video last arrived, for Hold.
+	holdKey     *baichuan.Frame
+	realMicros  uint32
+	realWall    time.Time
+	held        uint32
+	holdRunning bool
 }
 
 // SetTalker gives the stream a way to reach its camera's speaker.
@@ -213,6 +221,74 @@ func (s *Stream) Connected() {
 	s.checkParams = true
 }
 
+// holdAfter is how long a camera may send no video before Hold repeats its
+// last picture, and holdEvery how often it does. Readers such as Frigate's
+// ffmpeg give up after about 20 seconds without a frame.
+var (
+	holdAfter = 3 * time.Second
+	holdEvery = time.Second
+)
+
+// noteRealVideo records a frame that came from the camera, for Hold.
+func (s *Stream) noteRealVideo(f baichuan.Frame) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.realMicros, s.realWall, s.held = f.Micros, s.wallNow(), 0
+	if f.Kind == baichuan.FrameIFrame {
+		k := f
+		k.Data = append([]byte(nil), f.Data...)
+		s.holdKey = &k
+	}
+}
+
+// Hold keeps the stream showing its last picture while the camera sends no
+// video, for a camera with hold_picture set (enabled reports whether it
+// still is, so a config change takes effect without a restart). The last
+// keyframe is repeated once a second, on the camera's own timeline carried
+// forward, so the clock, and the reconnect rebase in videoFrame, see a
+// stream that simply kept going. Live video takes over again as soon as it
+// returns. It runs until ctx ends; a second call while one runs returns.
+func (s *Stream) Hold(ctx context.Context, enabled func() bool) {
+	s.mu.Lock()
+	if s.holdRunning {
+		s.mu.Unlock()
+		return
+	}
+	s.holdRunning = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.holdRunning = false
+		s.mu.Unlock()
+	}()
+	t := time.NewTicker(holdEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if f, ok := s.holdFrame(); ok && enabled() {
+				s.videoFrame(f)
+			}
+		}
+	}
+}
+
+// holdFrame returns the frame Hold should send now, if the camera has gone
+// quiet long enough and there is a picture to hold.
+func (s *Stream) holdFrame() (baichuan.Frame, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.holdKey == nil || s.wallNow().Sub(s.realWall) < holdAfter {
+		return baichuan.Frame{}, false
+	}
+	s.held++
+	f := *s.holdKey
+	f.Micros = s.realMicros + s.held*uint32(holdEvery/time.Microsecond)
+	return f, true
+}
+
 func (s *Stream) wallNow() time.Time {
 	if s.now != nil {
 		return s.now()
@@ -237,6 +313,7 @@ func (s *Stream) close() {
 func (s *Stream) Frame(f baichuan.Frame) {
 	switch f.Kind {
 	case baichuan.FrameIFrame, baichuan.FramePFrame:
+		s.noteRealVideo(f)
 		s.videoFrame(f)
 	case baichuan.FrameAAC:
 		s.aacFrame(f)

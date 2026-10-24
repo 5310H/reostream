@@ -109,9 +109,8 @@ Enter this camera's password:</p>
 </div>
 {{end}}
 {{if gt .Report.Channels 1}}
-<p class="hint">This is a {{.Report.Channels}}-lens camera. reostream serves the main lens above;
-the zoom lens is reachable only over RTSP (a camera limitation), at
-<code>rtsp://{{.Address}}/Preview_02_main</code> &mdash; point your recorder straight at that.</p>
+<p class="hint">This is a {{.Report.Channels}}-lens camera. reostream serves the second lens too, as the
+<code>zoom</code> stream, when the camera answers for it (listed above).</p>
 {{end}}
 {{if .Report.ServicesEnabled}}
 <p class="outcome-accepted">Turned on RTSP, ONVIF and the web page on this camera, so your recorder (and any second lens) can reach it.</p>

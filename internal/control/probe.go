@@ -89,9 +89,8 @@ type CameraReport struct {
 	// recorder and a second lens can reach it without any manual step.
 	ServicesEnabled bool
 	// Channels is how many lenses the camera reports. More than one means a
-	// dual-lens camera (a TrackMix, say): this probe reads the first lens,
-	// and the page says where the others are, since on these cameras the
-	// zoom lens is reachable only over RTSP, never this protocol.
+	// dual-lens camera (a TrackMix, say): the streams above are the first
+	// lens, and the second is the zoom stream when the camera answers for it.
 	Channels int
 }
 
@@ -308,11 +307,11 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 		}
 		rep.Streams = append(rep.Streams, sr)
 	}
-	// A second lens the camera only serves over its own RTSP server (the
-	// TrackMix zoom). Only reported when the camera answers for it.
+	// A second lens (the TrackMix zoom), over Baichuan or else the camera's
+	// own RTSP. Only reported when the camera answers for it.
 	if opts.Channel == 0 && opts.UID == "" {
-		zctx, zcancel := context.WithTimeout(ctx, 4*time.Second)
-		if codec, w, h, err := stream.NativeInfo(zctx, addr, opts.Username, opts.Password, "zoom"); err == nil {
+		zctx, zcancel := context.WithTimeout(ctx, 8*time.Second)
+		if codec, w, h, err := stream.ZoomInfo(zctx, addr, opts.Username, opts.Password); err == nil {
 			rep.Streams = append(rep.Streams, StreamReport{Name: "zoom", Codec: codec, Width: w, Height: h})
 		}
 		zcancel()
