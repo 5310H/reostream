@@ -51,7 +51,7 @@ ports instead: `-p 8560:8560 -p 8561:8561 -p 8562:8562 -p 2121-2131:2121-2131`.
 
 Your streams are at `rtsp://<host>:8561/<camera>` and `http://<host>:8560/<camera>.ts`.
 
-Prefer compose, Unraid, a plain binary or systemd? See `docs/setup.md`.
+On Unraid, install **reostream** from Community Apps. Prefer compose, a plain binary or systemd? See `docs/setup.md`.
 
 ![Status page](docs/images/status.png)
 

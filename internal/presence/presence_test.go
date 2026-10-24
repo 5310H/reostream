@@ -73,8 +73,10 @@ func TestAClipIsPlayedIntoTheStream(t *testing.T) {
 	p := New("porch", s)
 	p.Seed("../mp4read/testdata/h265.mp4")
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	go p.Run(ctx)
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+	// Stop the player before fast's cleanup puts the timings back.
+	t.Cleanup(func() { cancel(); <-done })
 	p.Play("../mp4read/testdata/h265.mp4")
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

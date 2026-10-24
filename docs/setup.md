@@ -59,7 +59,10 @@ the search does not find them.
 
 ### Unraid
 
-Until it is in Community Apps, add the template by hand. In the Unraid terminal:
+reostream is in Community Apps: search for **reostream** in the Apps tab and install it.
+The claim token is in the container's log (Docker tab, click the icon, Logs).
+
+To add the template by hand instead, in the Unraid terminal:
 
 ```
 mkdir -p /mnt/user/appdata/reostream && chown 65532:65532 /mnt/user/appdata/reostream

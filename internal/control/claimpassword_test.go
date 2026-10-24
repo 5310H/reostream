@@ -239,6 +239,9 @@ func postLogin(t *testing.T, s *Server, remoteAddr, pw string) *httptest.Respons
 // docker-proxy the attacker and the operator arrive from one address. See
 // serveLogin.
 func TestTheLoginNeverDelaysOrRefusesTheRightPassword(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a timing test; the race detector slows the password check too far for it to mean anything")
+	}
 	s := newTestServer(t, Options{Password: "hunter2", ConfigPath: writeTestConfig(t, "one")})
 	handler := s.Handler()
 
