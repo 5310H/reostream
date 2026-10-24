@@ -5,12 +5,15 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/VoltTech21/reostream/internal/config"
 	"github.com/VoltTech21/reostream/internal/control"
 )
 
@@ -324,5 +327,49 @@ func TestStartupWithABatteryCameraAndAKeptStill(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("startup hung")
+	}
+}
+
+func TestAClaimSavesTheListenFlagsTheDaemonWasStartedWith(t *testing.T) {
+	// #9, end to end: the flags main resolved must reach the claim, so the
+	// config it writes matches how the daemon is really running.
+	dir := t.TempDir()
+	d, err := startup("", dir, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "")
+	if err != nil {
+		t.Fatalf("startup: %v", err)
+	}
+	t.Cleanup(func() {
+		d.cancelSup()
+		if d.controlSrv != nil {
+			d.controlSrv.Close()
+		}
+		if d.rtspSrv != nil {
+			d.rtspSrv.Close()
+		}
+		d.httpSrv.Close()
+	})
+
+	token := regexp.MustCompile(`[A-Z0-9]{4}(-[A-Z0-9]{4}){3}`).FindString(d.firstRunMsg)
+	if token == "" {
+		t.Fatalf("no claim token in the first-run message:\n%s", d.firstRunMsg)
+	}
+	form := url.Values{"token": {token}, "password": {"correct-horse-battery"}}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.PostForm("http://"+d.controlLn.Addr().String()+"/claim", form)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("claim returned %d", resp.StatusCode)
+	}
+
+	cfg, err := config.Load(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("claimed config does not load: %v", err)
+	}
+	if cfg.Listen != "127.0.0.1:0" || cfg.RTSP == nil || cfg.RTSP.Listen != "127.0.0.1:0" ||
+		cfg.Control == nil || cfg.Control.Listen != "127.0.0.1:0" {
+		t.Fatalf("claimed config did not keep the flags: listen=%q rtsp=%+v control=%+v", cfg.Listen, cfg.RTSP, cfg.Control)
 	}
 }

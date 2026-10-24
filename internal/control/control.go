@@ -134,6 +134,14 @@ type Options struct {
 	ConfigPath      string
 	Supervisor      Reloader
 
+	// The addresses the daemon is actually running on, after -listen,
+	// -rtsp-listen and -control-listen. A claim writes these into the
+	// config it creates, so the file agrees with how reostream was
+	// started. Empty means the default for that listener.
+	Listen        string
+	RTSPListen    string
+	ControlListen string
+
 	// Probe asks a camera what it is, for the setup flow. Nil means
 	// probeCamera; tests substitute their own so they never dial a real
 	// camera.

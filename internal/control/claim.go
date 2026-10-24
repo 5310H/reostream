@@ -14,16 +14,16 @@ import (
 	"github.com/VoltTech21/reostream/internal/config"
 )
 
-// The listen addresses a claim writes into the config it creates. They
-// duplicate defaultListen and defaultControlListen in cmd/reostream/main.go,
-// which is a command and so cannot be imported from here.
+// The listen addresses a claim writes when the daemon was not told
+// otherwise. They duplicate defaultListen, defaultRTSPListen and
+// defaultControlListen in cmd/reostream/main.go, which is a command and so
+// cannot be imported from here.
 //
-// Writing them is safe rather than a guess: an install is only claimable
-// while it has no config file at all (see claimed), and no config file is
-// exactly the state in which main synthesizes those two defaults. So the
-// values written here are the ones the daemon is already listening on. The
-// one exception is an explicit -listen flag, which overrides the file; the
-// header comment in the written config says so.
+// An install is only claimable while it has no config file at all (see
+// claimed), which is exactly when main falls back to those defaults, unless
+// -listen, -rtsp-listen or -control-listen moved one. main hands the
+// resolved addresses over in Options, and a claim writes those; these
+// constants only fill in what was left empty.
 const (
 	claimDefaultListen        = "0.0.0.0:8560"
 	claimDefaultControlListen = "0.0.0.0:8562"
@@ -307,22 +307,31 @@ func validClaimPassword(pw string) error {
 }
 
 // claimConfigText is the whole config file a claim writes: the listen
-// addresses the daemon is already running on, and the [control] section
+// addresses the daemon is already running on (flags included), and the
+// [control] section
 // that makes the password real. %q is TOML-safe for a password that has
 // passed validClaimPassword -- the escapes Go emits for a quote and a
 // backslash are the ones TOML's basic strings take, and the values that
 // would differ, control characters, are refused before reaching here.
-func claimConfigText(password string) string {
+func claimConfigText(listen, rtspListen, controlListen, password string) string {
+	if listen == "" {
+		listen = claimDefaultListen
+	}
+	if rtspListen == "" {
+		rtspListen = claimDefaultRTSPListen
+	}
+	if controlListen == "" {
+		controlListen = claimDefaultControlListen
+	}
 	return fmt.Sprintf(`# reostream config.
 #
 # Written when this install was claimed. Everything here can be edited by
 # hand, or from the Config page.
 #
-# The listen addresses are the ones this daemon was already running on: an
-# install is only claimable while it has no config at all, which is exactly
-# when reostream falls back to these defaults. -listen and
-# -control-listen on the command line still override them; if you pass
-# either, change the matching line below so the two agree.
+# The listen addresses are the ones this daemon was running on when it was
+# claimed, including any -listen, -rtsp-listen or -control-listen flags it
+# was started with. Those flags still override this file, so if you change
+# them later, change the matching line below too.
 #
 # Add cameras from the Setup page, or by hand as [[camera]] blocks.
 
@@ -334,7 +343,7 @@ listen = %q
 [control]
 listen = %q
 password = %q
-`, claimDefaultListen, claimDefaultRTSPListen, claimDefaultControlListen, password)
+`, listen, rtspListen, controlListen, password)
 }
 
 // errAlreadyClaimed is the re-check inside the claim's lock finding that
@@ -574,7 +583,7 @@ func (s *Server) serveClaim(w http.ResponseWriter, r *http.Request) {
 		}
 		// checkFleet is nil: a claim writes no cameras, so there is no
 		// camera list for the supervisor to have an opinion about.
-		return saveConfig(s.opts.ConfigPath, claimConfigText(password), nil)
+		return saveConfig(s.opts.ConfigPath, claimConfigText(s.opts.Listen, s.opts.RTSPListen, s.opts.ControlListen, password), nil)
 	}()
 	if err == nil {
 		// Live, under the write lock every request's auth read takes, so

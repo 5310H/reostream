@@ -314,6 +314,9 @@ func startup(configFlag, dataDir, listenOverride, rtspListenOverride, controlLis
 			StreamBase:      streamBase,
 			ConfigPath:      configPath,
 			Supervisor:      sup,
+			Listen:          listen,
+			RTSPListen:      rtspListenFor(cfg),
+			ControlListen:   controlListen,
 		})
 		if err != nil {
 			cancelSup()
@@ -627,4 +630,14 @@ func (c cameraTalker) Open(ctx context.Context) (rtsp.TalkSession, error) {
 		return nil, err
 	}
 	return sess, nil
+}
+
+// rtspListenFor is the RTSP address a claim should write: the one RTSP is
+// running on, -rtsp-listen included. Empty (RTSP off) lets the claim fall
+// back to its default, which is what a fresh install runs anyway.
+func rtspListenFor(cfg *config.Config) string {
+	if cfg.RTSP == nil {
+		return ""
+	}
+	return cfg.RTSP.Listen
 }

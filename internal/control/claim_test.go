@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/VoltTech21/reostream/internal/config"
 )
 
 func TestAnUnclaimedInstallServesTheClaimScreen(t *testing.T) {
@@ -119,6 +121,49 @@ func TestClaimWritesTheConfigItPromises(t *testing.T) {
 	// The file holds a password, so it must not be readable by anyone else.
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		t.Fatalf("claimed config is mode %04o, want no group or other access", perm)
+	}
+}
+
+func TestClaimWritesTheAddressesTheDaemonWasStartedWith(t *testing.T) {
+	// #9: a daemon started with -listen, -rtsp-listen and -control-listen
+	// must not write the defaults on claim, or the file disagrees with the
+	// flags and a restart without them moves every port.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	s := newTestServer(t, Options{
+		AllowNoPassword: true,
+		ConfigPath:      path,
+		Listen:          "0.0.0.0:9560",
+		RTSPListen:      "0.0.0.0:9554",
+		ControlListen:   "127.0.0.1:9562",
+	})
+	if rec := postClaim(t, s, "correct-horse-battery"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("claim returned %d; body: %s", rec.Code, rec.Body.String())
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("claimed config does not load: %v", err)
+	}
+	if cfg.Listen != "0.0.0.0:9560" {
+		t.Errorf("listen = %q, want the -listen address", cfg.Listen)
+	}
+	if cfg.RTSP == nil || cfg.RTSP.Listen != "0.0.0.0:9554" {
+		t.Errorf("rtsp = %+v, want the -rtsp-listen address", cfg.RTSP)
+	}
+	if cfg.Control == nil || cfg.Control.Listen != "127.0.0.1:9562" {
+		t.Errorf("control = %+v, want the -control-listen address", cfg.Control)
+	}
+}
+
+func TestClaimWritesTheDefaultsWhenNoFlagsWereGiven(t *testing.T) {
+	text := claimConfigText("", "", "", "correct-horse-battery")
+	for _, want := range []string{
+		`listen = "` + claimDefaultListen + `"`,
+		`listen = "` + claimDefaultRTSPListen + `"`,
+		`listen = "` + claimDefaultControlListen + `"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("claimed config is missing %s:\n%s", want, text)
+		}
 	}
 }
 
