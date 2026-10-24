@@ -2,6 +2,7 @@ package control
 
 import (
 	"io/fs"
+	"regexp"
 	"sort"
 	"testing"
 )
@@ -22,13 +23,33 @@ import (
 func TestOnlyTheListedAssetsAreEmbedded(t *testing.T) {
 	want := []string{
 		"assets/LICENSE-mpegts.txt",
+		// The seam aligner. World readable for the same reason as the
+		// dewarp renderer: sliders, a canvas and one POST, holding no
+		// camera name, address, credential or config.
+		"assets/align.js",
 		"assets/dashboard.js",
+		// The encoder form's own narrowing. World readable on the same
+		// terms as the rest: it holds the camera's option table only as
+		// the page it runs on already shows it, and no credential.
+		"assets/encoding.js",
+		// The dewarp renderer and its page wiring. Both are meant to be
+		// world readable: they are the same bytes for every install and
+		// hold no camera name, address, credential or config -- the
+		// projection is arithmetic on a picture the browser already has.
+		"assets/fisheye.js",
+		"assets/fisheyeview.js",
+		"assets/live.js",
 		"assets/README.md",
 		"assets/mpegts.js",
 		"assets/mpegts.js.LICENSE.txt",
+		"assets/rec.js",
 		"assets/settings.js",
 		"assets/snapshot.js",
 		"assets/style.css",
+		// The camera page's hold-to-talk wiring. World readable on the same
+		// terms: microphone capture and a socket to this page's own host,
+		// with no camera name, address or credential in it.
+		"assets/talk.js",
 	}
 
 	var got []string
@@ -55,5 +76,31 @@ func TestOnlyTheListedAssetsAreEmbedded(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("embedded assets are %v, want %v", got, want)
 		}
+	}
+}
+
+// TestEveryReferencedAssetIsEmbedded catches the other half of the explicit
+// list: a template that loads /assets/x.js while x.js was never added to the
+// directive gets a 404 in the browser and a control that silently does
+// nothing, with every other test green. The talk button shipped that way.
+func TestEveryReferencedAssetIsEmbedded(t *testing.T) {
+	re := regexp.MustCompile(`/assets/([A-Za-z0-9._-]+)`)
+	err := fs.WalkDir(templateFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(templateFS, path)
+		if err != nil {
+			return err
+		}
+		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
+			if _, err := fs.Stat(assetFS, "assets/"+m[1]); err != nil {
+				t.Errorf("%s loads /assets/%s, which is not embedded", path, m[1])
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -79,12 +79,11 @@ func TestSetFieldEscapesTheValue(t *testing.T) {
 	}
 }
 
-// TestImageGroupIsMarkedUnsafeToRewrite pins Group.Block to an id
-// confidenceOf and baichuan.UnsafeToRewrite actually agree is unsafe, and
-// pins that a warning field rides along with it, so a future edit that
-// drops either the block or the warning fails here rather than only
-// showing up as a missing warning on a page nobody re-reads by eye.
-func TestImageGroupIsMarkedUnsafeToRewrite(t *testing.T) {
+// TestImageGroupIsInstantDespiteItsBlock pins the Image group to the isp
+// block, which the raw-document page treats as unsafe to rewrite, and pins
+// that the curated Image fields are still shown as instant: they were seen
+// changing the live picture without a dropout.
+func TestImageGroupIsInstantDespiteItsBlock(t *testing.T) {
 	found := false
 	for _, g := range groups() {
 		if !slices.Contains(g.Blocks, "isp get") {
@@ -98,8 +97,12 @@ func TestImageGroupIsMarkedUnsafeToRewrite(t *testing.T) {
 		if !baichuan.UnsafeToRewrite(pair.Set) {
 			t.Fatalf("group %q's block %q is not unsafe to rewrite, but this test assumed it was", g.Title, "isp get")
 		}
-		if !g.InterruptsStream {
-			t.Fatalf("group %q edits an unsafe-to-rewrite block but is not marked InterruptsStream", g.Title)
+		// The Image fields are the exception the block's flag does not
+		// know about: brightness, contrast, saturation, color mode and flip
+		// were watched changing the live picture without a dropout, so
+		// they save instantly and are not marked as interrupting.
+		if g.InterruptsStream || g.Reboots {
+			t.Fatalf("group %q is marked as interrupting, but its saves were seen to be instant", g.Title)
 		}
 	}
 	if !found {
@@ -166,9 +169,9 @@ func TestServeSettingsRendersTheCuratedFieldsSeededFromTheCamera(t *testing.T) {
 	// this document on every camera this project has read, so a fixture
 	// without them would leave the two position controls unavailable for a
 	// reason no real camera has.
-	osdXML := testXMLHeader + `<body><OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName><OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>1</topLeftX><topLeftY>1</topLeftY></OsdDatetime></body>`
-	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight></InputAdvanceCfg></body>`
-	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state></LedState></body>`
+	osdXML := testXMLHeader + `<body><OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>1</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName><OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>1</topLeftX><topLeftY>1</topLeftY></OsdDatetime></body>`
+	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight><mirror>0</mirror><flip>0</flip></InputAdvanceCfg></body>`
+	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state><lightState>open</lightState></LedState></body>`
 
 	// serveSettings reads every group's block on one connection, in the
 	// order groups() declares them, and fakecam streams its whole fixture
@@ -190,7 +193,7 @@ func TestServeSettingsRendersTheCuratedFieldsSeededFromTheCamera(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/cameras/cam1")
+	resp, err := http.Get(ts.URL + "/cameras/cam1/settings/overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +207,9 @@ func TestServeSettingsRendersTheCuratedFieldsSeededFromTheCamera(t *testing.T) {
 	}
 	html := string(raw)
 
-	for _, want := range []string{"Camera name", "Show camera name", "Show timestamp", "Brightness", "Contrast", "Saturation", "Day and night mode", "Infrared cut filter"} {
+	// The overlay section only; the Image fields are their own section,
+	// pinned by TestCameraSettingsSectionsReadOnlyTheirOwnBlock.
+	for _, want := range []string{"Camera name", "Show camera name", "Show timestamp"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("page does not render the %q field", want)
 		}
@@ -213,15 +218,6 @@ func TestServeSettingsRendersTheCuratedFieldsSeededFromTheCamera(t *testing.T) {
 	// with must appear as the value of its control.
 	if !strings.Contains(html, `value="lounge"`) {
 		t.Errorf("page does not show the camera name read from the camera:\n%s", html)
-	}
-	if !strings.Contains(html, `value="120"`) {
-		t.Errorf("page does not show the brightness read from the camera:\n%s", html)
-	}
-	// The infrared cut filter is shown, but not as an input: nothing has
-	// established what values the firmware accepts, and it moves a physical
-	// part, so the page reports it rather than inviting a guess.
-	if !strings.Contains(html, `<span class="exact">ir</span>`) {
-		t.Errorf("page does not show the infrared cut filter read from the camera:\n%s", html)
 	}
 	if strings.Contains(html, `name="value" value="ir"`) {
 		t.Errorf("the infrared cut filter is an editable input again:\n%s", html)
@@ -369,8 +365,8 @@ func TestServeApplySettingRefusesWhenTheFieldDoesNotResolve(t *testing.T) {
 		t.Fatal("isp get pair not found")
 	}
 	// A document this model actually returned, but with no
-	// InputAdvanceCfg/DayNight/IrcutMode at all: the curated field names a
-	// path this camera does not carry.
+	// InputAdvanceCfg/mirror at all: the curated field names a path this
+	// camera does not carry.
 	before := `<body><VideoInput><channelId>0</channelId><bright>120</bright></VideoInput></body>`
 
 	key := baichuan.AESKey(testProbeNonce, "")
@@ -392,8 +388,8 @@ func TestServeApplySettingRefusesWhenTheFieldDoesNotResolve(t *testing.T) {
 	c := flashBrowser(t)
 	resp := postForm(t, c, ts.URL+"/cameras/cam1/settings", url.Values{
 		"block": {"isp get"},
-		"xpath": {"InputAdvanceCfg/DayNight/IrcutMode"},
-		"value": {"ir"},
+		"xpath": {"InputAdvanceCfg/mirror"},
+		"value": {"1"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		raw, _ := io.ReadAll(resp.Body)
@@ -418,7 +414,7 @@ func TestServeApplySettingRefusesWhenTheFieldDoesNotResolve(t *testing.T) {
 // TestCuratedXPathsResolveAgainstRealLiveFixtures builds the fixes
 // directly against testdata/livefixtures: a real RLC-810A's own osd2.xml,
 // isp.xml and led.xml. An earlier version of groups() invented XPaths that
-// matched none of these documents at all (Finding 4); this pins every
+// matched none of these documents at all; this pins every
 // currently curated, non-warning field to a path present in the actual
 // capture, so a future invented path fails here rather than only showing
 // up as a blank box on a real camera.
@@ -427,6 +423,13 @@ func TestCuratedXPathsResolveAgainstRealLiveFixtures(t *testing.T) {
 		"osd get": readTestdata(t, "testdata/livefixtures/osd2.xml"),
 		"isp get": readTestdata(t, "testdata/livefixtures/isp.xml"),
 		"led get": readTestdata(t, "testdata/livefixtures/led.xml"),
+		// The alert blocks, read off a TrackMix PoE (2026-10-23), passwords
+		// blanked.
+		"ftp task get":   readTestdata(t, "testdata/livefixtures/trackmix-ftptask.xml"),
+		"ftp cfg get":    readTestdata(t, "testdata/livefixtures/trackmix-ftpcfg.xml"),
+		"email task get": readTestdata(t, "testdata/livefixtures/trackmix-emailtask.xml"),
+		"email cfg get":  readTestdata(t, "testdata/livefixtures/trackmix-emailcfg.xml"),
+		"push task get":  readTestdata(t, "testdata/livefixtures/trackmix-pushtask.xml"),
 	}
 	want := map[string]string{
 		"OsdChannelName/name":   "Rear Bay",
@@ -445,6 +448,11 @@ func TestCuratedXPathsResolveAgainstRealLiveFixtures(t *testing.T) {
 		"InputAdvanceCfg/DayNight/mode":      "auto",
 		"InputAdvanceCfg/DayNight/IrcutMode": "ir",
 		"LedState/state":                     "auto",
+		"FtpTask/enable":                     "0",
+		"Ftp/port":                           "21",
+		"EmailTask/enable":                   "1",
+		"Email/smtpPort":                     "465",
+		"PushTask/enable":                    "1",
 	}
 	for _, g := range groups() {
 		for _, f := range g.Fields {
@@ -508,8 +516,7 @@ func TestNoDefaultsOnlyBlockCanEverBeCuratedTogether(t *testing.T) {
 	}
 }
 
-// TestResolveGroupBlockFallsBackToTheSecondCandidate is Finding 4's
-// discovery mechanism: a camera that answers 405 for the first candidate
+// TestResolveGroupBlockFallsBackToTheSecondCandidate: a camera that answers 405 for the first candidate
 // but 200 for the second must still seed the group, from whichever
 // candidate actually worked, not fail the whole group because the first
 // guess was wrong. This is exactly the shop_rear-probe.txt fact this page
@@ -553,8 +560,7 @@ func TestResolveGroupBlockFallsBackToTheSecondCandidate(t *testing.T) {
 	}
 }
 
-// TestUnavailableFieldRendersExplanationNotBlankInput is Finding 3: a
-// curated field whose block never answered must say so where the control
+// TestUnavailableFieldRendersExplanationNotBlankInput: a curated field whose block never answered must say so where the control
 // would be, not render an empty, silently-broken editable input.
 func TestUnavailableFieldRendersExplanationNotBlankInput(t *testing.T) {
 	osdGetPair, ok := pairForName("osd get")
@@ -596,7 +602,7 @@ func TestUnavailableFieldRendersExplanationNotBlankInput(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/cameras/cam1")
+	resp, err := http.Get(ts.URL + "/cameras/cam1/settings/overlay")
 	if err != nil {
 		t.Fatal(err)
 	}

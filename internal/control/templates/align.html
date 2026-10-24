@@ -1,0 +1,84 @@
+{{/*
+  align.html: the seam, full window, with the three controls over it.
+
+  Judging a seam means looking at the seam, large, while it moves, so the
+  picture gets the window and the controls float. The camera page keeps its
+  number boxes for when the values are already known.
+*/}}
+{{define "body"}}
+<div id="align" data-url="{{.URL}}" data-post="/cameras/{{.Camera}}/stitch">
+<canvas id="align-canvas"></canvas>
+<video id="align-video" playsinline muted hidden></video>
+
+<div class="align-bar">
+<a class="align-back" href="/cameras/{{.Camera}}">&larr; {{.Camera}}</a>
+
+{{/* No controls without numbers from the camera. An unread alignment is a
+     zero one as far as the page is concerned, and these controls write on
+     release, so a bar rendered over a failed read turns the first nudge
+     into "set this camera to zero" -- against an alignment nobody can see
+     to put back. The picture still plays, which is the half of this page
+     that works without the camera's control channel. */}}
+{{if .Have}}
+<label class="align-field">
+<span>Focus distance</span>
+<input type="range" id="al-distance-range" step="0.1"
+ min="{{.Stitch.MinDistance}}" max="{{.Stitch.MaxDistance}}" value="{{.Stitch.Distance}}">
+<input type="number" id="al-distance" step="0.1"
+ min="{{.Stitch.MinDistance}}" max="{{.Stitch.MaxDistance}}" value="{{.Stitch.Distance}}">
+</label>
+
+<label class="align-field">
+<span>Horizontal</span>
+<input type="range" id="al-x-range" step="1"
+ min="{{.Stitch.MinX}}" max="{{.Stitch.MaxX}}" value="{{.Stitch.X}}">
+<input type="number" id="al-x" step="1"
+ min="{{.Stitch.MinX}}" max="{{.Stitch.MaxX}}" value="{{.Stitch.X}}">
+</label>
+
+<label class="align-field">
+<span>Vertical</span>
+<input type="range" id="al-y-range" step="1"
+ min="{{.Stitch.MinY}}" max="{{.Stitch.MaxY}}" value="{{.Stitch.Y}}">
+<input type="number" id="al-y" step="1"
+ min="{{.Stitch.MinY}}" max="{{.Stitch.MaxY}}" value="{{.Stitch.Y}}">
+</label>
+{{end}}
+
+<label class="align-field align-zoom">
+<span>Zoom</span>
+<input type="range" id="al-zoom" min="1" max="8" step="0.1" value="1">
+<output id="al-zoom-out"></output>
+</label>
+
+<label class="align-check"><input type="checkbox" id="al-guide" checked> Seam guide</label>
+
+{{if .Have}}
+{{/* The way back out of a nudge that went wrong. Revert is where the seam
+     was when this page opened, Factory is the camera's own shipped
+     alignment. Unlike the camera page these send on the spot, because
+     every other control on this page does and the picture behind them is
+     the whole point: an undo you have to confirm elsewhere is not an undo
+     you can judge. */}}
+<span class="align-undo">
+<button type="button" id="al-revert"
+ data-distance="{{.Stitch.Distance}}" data-x="{{.Stitch.X}}" data-y="{{.Stitch.Y}}"
+ title="back to the alignment this page opened with">&#8634; Revert</button>
+<button type="button" id="al-factory"
+ data-distance="{{.Stitch.FacDistance}}" data-x="{{.Stitch.FacX}}" data-y="{{.Stitch.FacY}}"
+ title="back to the camera's factory alignment">&#8634; Factory</button>
+</span>
+{{else}}
+<span class="align-failed">{{.Err}}</span>
+{{end}}
+</div>
+
+<p class="align-note" id="align-note">{{if .Have}}Drag a control and let go &mdash; it writes when you
+release, because each change is a round trip to the camera. Zoom in on the seam to judge it.
+{{else}}The picture is live, but the alignment could not be read, so there is nothing to
+change it against. Zoom and the seam guide still work.{{end}}</p>
+</div>
+
+<script src="/assets/mpegts.js"></script>
+<script src="/assets/align.js"></script>
+{{end}}

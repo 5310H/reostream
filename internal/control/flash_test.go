@@ -318,8 +318,8 @@ func TestARefusedCuratedWriteReportsAsRefusedNotAsSuccess(t *testing.T) {
 	resp := postForm(t, c, ts.URL+"/cameras/cam1/settings", url.Values{
 		"return": {"/"},
 		"block":  {"isp get"},
-		"xpath":  {"InputAdvanceCfg/DayNight/IrcutMode"},
-		"value":  {"ir"},
+		"xpath":  {"InputAdvanceCfg/mirror"},
+		"value":  {"1"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("got %d, want 303", resp.StatusCode)

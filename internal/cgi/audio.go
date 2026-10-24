@@ -6,16 +6,34 @@ import (
 	"fmt"
 )
 
-// Speaker volume (GetAudioCfg) and alarm sound on/off (GetAudioAlarmV20).
-// The sound list, upload and siren commands return -9 (not supported) on the
-// models tested, so they aren't implemented.
+// The camera's own noise: how loud it is, and whether it makes any when it
+// sees something.
+//
+// What is here is what the cameras answer, which is less than the message
+// table suggests. Both the fisheye and the pano report "audio alarm yes",
+// and over CGI that buys exactly two commands: GetAudioCfg, which is a
+// volume with a range, and GetAudioAlarmV20, which is an on/off plus a
+// week-long schedule per kind of detection. Everything else that would make
+// a siren page interesting -- the sound list, the custom upload, playing one
+// on demand -- answers "not support" on both models, with rspCode -9.
+//
+// -9 and -1 are different answers and the difference is worth keeping: -1 is
+// "no such command", -9 is "that command exists and this model does not do
+// it". GetAudioFileList, GetAudioFileInfoList, GetAudioFileListV20,
+// GetAlarmAudio, GetAudioTask, GetAudioTaskList, GetSiren, GetAudioPlay and
+// GetBuzzerAlarmV20 all answered -9 on the fisheye, so that whole surface is
+// real firmware that these cameras do not implement. Its Baichuan
+// equivalents (347, 349, 261, 262) are a separate question and are not
+// touched here.
 
 // AudioCfg is the camera's speaker volume.
 type AudioCfg struct {
 	Volume int `json:"volume"`
 }
 
-// VolumeRange is the volume range the camera reports.
+// VolumeRange is what the camera says a volume may be. It is read rather
+// than assumed for the same reason the encoder's stops are: 0 to 100 is what
+// these two cameras answer, and a third camera has not been asked.
 type VolumeRange struct {
 	Min int `json:"min"`
 	Max int `json:"max"`
@@ -38,7 +56,8 @@ func (c *Client) GetAudioCfg(ctx context.Context, channel int) (AudioCfg, Volume
 			Volume VolumeRange `json:"volume"`
 		} `json:"AudioCfg"`
 	}
-	// A missing range is not an error; the caller gets a zero range.
+	// A camera that answers the value but not the range is not an error:
+	// the caller gets a zero range and offers no slider bounds of its own.
 	_ = json.Unmarshal(rng, &r)
 	return v.AudioCfg, r.AudioCfg.Volume, nil
 }
@@ -50,8 +69,14 @@ func (c *Client) SetAudioCfg(ctx context.Context, channel, volume int) error {
 	})
 }
 
-// GetAudioAlarm reads the alarm sound document as a map, since the schedule
-// entries differ by model. Callers change a field and write it back whole.
+// GetAudioAlarm reads the alarm sound's whole document.
+//
+// A map rather than a struct, the same discipline readFloodlightDoc uses:
+// the document carries a schedule of 168 characters per detection type --
+// one per hour of the week -- and the types differ by model. The fisheye
+// sends AI_PEOPLE, AI_VEHICLE and MD; the pano sends crossline and intrusion
+// entries instead. Nothing here models that, and nothing here may drop it,
+// so the caller changes one field on top of what the camera sent.
 func (c *Client) GetAudioAlarm(ctx context.Context, channel int) (map[string]any, error) {
 	value, _, _, err := c.Get(ctx, "GetAudioAlarmV20", channel)
 	if err != nil {
@@ -75,8 +100,9 @@ func AudioAlarmEnabled(doc map[string]any) bool {
 	return ok && f != 0
 }
 
-// SetAudioAlarmEnabled turns the alarm sound on or off. It writes back the
-// camera's document with only that field changed, keeping the schedule.
+// SetAudioAlarmEnabled turns the alarm sound on or off, writing the
+// camera's own document back with that one field changed -- never a
+// composed one, which would drop the schedule the camera keeps in it.
 func (c *Client) SetAudioAlarmEnabled(ctx context.Context, channel int, doc map[string]any, on bool) error {
 	next := make(map[string]any, len(doc)+1)
 	for k, v := range doc {

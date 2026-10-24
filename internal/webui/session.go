@@ -5,10 +5,12 @@
 package webui
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"net/http"
 	"sync"
 	"time"
@@ -120,22 +122,85 @@ type Auth struct {
 	CookieName      string
 }
 
+// loginKDFIterations is how much work one password check costs.
+//
+// It is the only thing bounding how fast this page can be guessed at, and
+// that is deliberate: see serveLogin in internal/control for the four
+// source-keyed rate limits that were built, measured and removed. Every one
+// of them failed the same way -- behind docker-proxy the attacker's key IS
+// the operator's, so a limit can refuse the operator, delay the operator,
+// or bound nothing.
+//
+// Cost per guess is the one lever an attacker cannot turn, because the work
+// happens on this server rather than on theirs. A single SHA-256 was free,
+// which is why the measured worst case was ~8,400 guesses a second. At
+// 100,000 iterations one derivation takes ~83ms, and a check does two, so a
+// guess costs ~166ms of a core: roughly 50 a second with every core on this
+// machine saturated, against 8,400 before. That is the ~2^7.5 that lets
+// claimPasswordMinLength come down from 16 characters to 12.
+//
+// Nothing here can lock anybody out. There is no key, no counter and no
+// state: the operator pays the same ~166ms once, which is imperceptible,
+// and an attacker flooding the endpoint burns CPU without ever being able
+// to refuse the operator a turn.
+const loginKDFIterations = 100_000
+
+// loginKDFSalt is fixed rather than random, and that is correct HERE
+// although it would be wrong almost anywhere else.
+//
+// A salt defends a STORED hash: it stops one table of precomputed hashes
+// breaking every account at once. Nothing is stored here. The password
+// lives in the config file as text, this derivation exists only to make an
+// ONLINE guess expensive, and the result is thrown away after the compare.
+// There is one account and no database to steal, so there is nothing for a
+// per-install salt to protect. A fixed one keeps Auth a plain value that
+// can be copied and compared without carrying state.
+var loginKDFSalt = []byte("reostream login kdf v1")
+
+// stretch is PBKDF2-HMAC-SHA256 for a single 32 byte block: U1 = HMAC(pw,
+// salt||1), Ui = HMAC(pw, Ui-1), and the output is every U xored together.
+// Written out rather than imported because crypto/pbkdf2 is not in this
+// toolchain's standard library and this is the whole of it for one block --
+// a standard construction over stdlib HMAC, not a new one.
+func stretch(password string, iter int) [32]byte {
+	mac := hmac.New(sha256.New, []byte(password))
+	block := make([]byte, len(loginKDFSalt)+4)
+	copy(block, loginKDFSalt)
+	binary.BigEndian.PutUint32(block[len(loginKDFSalt):], 1)
+	mac.Write(block)
+	u := mac.Sum(nil)
+
+	var out [32]byte
+	copy(out[:], u)
+	for i := 1; i < iter; i++ {
+		mac.Reset()
+		mac.Write(u)
+		u = mac.Sum(u[:0])
+		for j := range out {
+			out[j] ^= u[j]
+		}
+	}
+	return out
+}
+
 // Check compares a submitted password in constant time, so a wrong one
 // cannot be found a character at a time by measuring the reply.
 //
-// Hashed first, rather than compared directly. subtle.ConstantTimeCompare
-// returns 0 immediately when the two lengths differ, so comparing the raw
-// strings is constant time in their CONTENT and not in their LENGTH: a
-// guesser could learn how long the real password is by timing replies, and
-// on a page with no rate limit that is a free head start. Two SHA-256 sums
-// are always the same size, so the comparison below cannot short circuit on
-// anything.
+// Derived first, rather than compared directly, for two separate reasons.
 //
-// The claim token compare in internal/control was built to avoid exactly
-// this and this one was not; they now agree.
+// Length: subtle.ConstantTimeCompare returns 0 immediately when the two
+// lengths differ, so comparing the raw strings is constant time in their
+// CONTENT and not in their LENGTH. A guesser could learn how long the real
+// password is by timing replies. Two derived keys are always the same size,
+// so the comparison below cannot short circuit on anything.
+//
+// Cost: see loginKDFIterations. Both sides are derived on every call, not
+// just the submitted one. Deriving the configured password once and caching
+// it would save the operator ~83ms and halve the attacker's cost per guess,
+// which is the wrong way round.
 func (a Auth) Check(password string) bool {
-	got := sha256.Sum256([]byte(password))
-	want := sha256.Sum256([]byte(a.Password))
+	got := stretch(password, loginKDFIterations)
+	want := stretch(a.Password, loginKDFIterations)
 	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
 }
 

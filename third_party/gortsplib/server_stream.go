@@ -452,6 +452,7 @@ func (st *ServerStream) descForDescribe(
 				Control:      "trackID=" + strconv.FormatInt(int64(i), 10),
 				Profile:      profile,
 				KeyMgmtMikey: keyMgmtMikey,
+				FrameRate:    medi.FrameRate,
 				Formats:      formatsForDesc,
 			})
 		}

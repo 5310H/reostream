@@ -21,7 +21,7 @@ import (
 // form asks before it submits. It belongs in the template as much as in
 // this comment: a person choosing "on" needs to read this before the click
 // happens, not discover it afterward in a log.
-const lightsConfirmReason = "This changes a physical light on the camera right now, not just a document. Are you sure?"
+const lightsConfirmReason = "Change this light on the camera?"
 
 // mode and state are different things, and conflating them makes the light
 // look as though it only has an on switch. mode is what the light does;
@@ -227,6 +227,7 @@ func (s *Server) serveApplyFloodlight(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("connecting to %s: %v", cam.Name, err), http.StatusBadGateway)
 		return
 	}
+	defer c.Close()
 
 	// Best effort: a failed pre-read is not a reason to refuse the write
 	// itself, only to leave Before blank.
@@ -271,5 +272,5 @@ func (s *Server) serveApplyFloodlight(w http.ResponseWriter, r *http.Request) {
 	// Back to the camera page, where the floodlight control lives, rather
 	// than onto a result page: see serveApplySetting for why every curated
 	// write now redirects instead of rendering.
-	http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name), http.StatusSeeOther)
+	http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name)+"/settings/lights", http.StatusSeeOther)
 }

@@ -1,0 +1,83 @@
+{{/*
+  camshell.html: the header every camera page shares (camshell.go's camHead),
+  per the redesign: camera switcher with previous / next and the [ ] keys,
+  state, model, address, firmware, a link to the camera's own page, then the
+  Live and Settings tabs. "catnav" is the Settings tab's category list.
+*/}}
+{{define "camhead"}}
+<header class="camhead">
+<div class="camhead-row">
+{{if .Prev}}<a class="camhead-step camhead-prev" href="{{.SwitchHref .Prev}}" data-key="[" aria-label="Previous camera: {{.Prev}}">&#8249;</a>{{end}}
+<label class="camhead-pick">
+<span class="visually-hidden">Camera</span>
+<select onchange="location.href=this.value">
+{{$h := .}}{{range .Cameras}}<option value="{{$h.SwitchHref .Name}}"{{if eq .Name $h.Name}} selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+</label>
+{{if .Next}}<a class="camhead-step camhead-next" href="{{.SwitchHref .Next}}" data-key="]" aria-label="Next camera: {{.Next}}">&#8250;</a>{{end}}
+<span class="camhead-facts">
+<span class="statebadge state-{{.State}}"><span class="dot" style="background:currentColor"></span>{{stateLabel .State}}</span>
+{{with .Model}}<span>{{.}}</span>{{end}}
+<a class="mono camhead-ip" href="http://{{.Address}}" target="_blank" rel="noopener noreferrer" title="Open the camera's own page">{{.Address}}&nbsp;&#8599;</a>
+{{with .Firmware}}<span class="mono">{{.}}</span>{{end}}
+</span>
+</div>
+<nav class="tabs camtabs">
+<a href="/cameras/{{.Name}}"{{if eq .Tab "live"}} aria-current="page"{{end}}>Live</a>
+{{if .HasClips}}<a href="/cameras/{{.Name}}/recordings"{{if eq .Tab "recordings"}} aria-current="page"{{end}}>Recordings</a>{{end}}
+<a href="/cameras/{{.Name}}/settings/image"{{if eq .Tab "settings"}} aria-current="page"{{end}}>Settings</a>
+{{if gt (len .Cameras) 1}}<span class="camtabs-hint">press <kbd>[</kbd> <kbd>]</kbd> to switch camera</span>{{end}}
+</nav>
+</header>
+<script>
+// [ and ] step through the cameras, like the redesign. Not while typing.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== '[' && e.key !== ']') return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  var t = e.target && e.target.tagName;
+  if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+  var a = document.querySelector('.camhead-step[data-key="' + e.key + '"]');
+  if (a) location.href = a.getAttribute('href');
+});
+</script>
+{{end}}
+
+{{define "catnav"}}
+<nav class="catnav" aria-label="Settings">
+{{range .Nav}}
+<p class="catnav-title">{{.Title}}</p>
+<ul>
+{{range .Items}}<li><a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a></li>{{end}}
+</ul>
+{{end}}
+</nav>
+{{end}}
+
+{{define "tierlegend"}}
+<div class="tierbar" aria-label="What each dot before a setting means">
+<span class="tierbar-lead">Dot before each setting:</span>
+<span><span class="tier tier-instant"></span>Instant</span>
+<span><span class="tier tier-interruption"></span>Interruption</span>
+<span><span class="tier tier-reboot"></span>Restarts</span>
+<span><span class="tier tier-untested"></span>Untested</span>
+<span class="tierbar-changed"><span class="changed"></span>changed from default</span>
+</div>
+{{end}}
+
+{{/* camsettings opens and closes the Settings tab frame around a page's
+     own sections: "camsettings-open" before them, "camsettings-close" after. */}}
+{{define "camsettings-open"}}
+{{template "camhead" .}}
+<div class="cam-settings">
+{{template "catnav" .}}
+<div class="cam-pane">
+{{template "tierlegend"}}
+{{end}}
+{{define "camsettings-close"}}
+</div>
+</div>
+{{end}}
+
+{{/* The small "i" after a label: one line of explanation, on hover or tap.
+     The page script (layout.html) opens and closes it. */}}
+{{define "info"}}<span class="info-wrap"><button type="button" class="info" aria-label="About this setting" aria-expanded="false">i</button><span class="info-pop" role="tooltip">{{.}}</span></span>{{end}}

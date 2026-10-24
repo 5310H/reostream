@@ -6,9 +6,36 @@
 <div class="step"><span class="n">3</span>Point your recorder at it</div>
 </div>
 
-<h1>Add your first camera</h1>
-<p class="subtitle">reostream connects and tells you what the camera is before anything is saved.</p>
+<h1>Find your cameras</h1>
+<p class="subtitle">reostream looks on your network as soon as this page opens. Enter a
+password only for the cameras that ask for one.</p>
 
+{{/* The scan runs on load, from the script below, against the subnets this
+     install already knows are the operator's: the one their browser is on,
+     and the one every camera they have added is on. Nothing to type. */}}
+<div id="discover-result" data-auto='{{.AutoRangesJSON}}'>
+<p class="hint">Looking for cameras&hellip;</p>
+</div>
+
+<details class="card">
+<summary>Search a different network</summary>
+<form id="discover-form">
+<div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
+<label class="field"><span class="label">Network to search</span>
+<input name="range" value="{{.Prefill}}" placeholder="192.168.1.0/24" required></label>
+<button type="submit" class="quiet">Search</button>
+</div>
+<p class="hint">A range no larger than a /24 (254 addresses) &mdash; that is one ordinary
+home or office network, and almost always holds every camera. The quickest way to name one
+is to paste a camera's address: <code>192.0.2.11</code> searches <code>192.0.2.0/24</code>.
+Whatever you search is remembered in this browser and scanned automatically next time.</p>
+</form>
+</details>
+
+<details class="card">
+<summary>Add a camera by its address</summary>
+<p class="hint">For a camera on a username other than <code>admin</code>, or one the scan cannot
+reach. reostream connects and tells you what it is before anything is saved.</p>
 <form id="probe-form">
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
 <label class="field"><span class="label">Address</span><input name="address" placeholder="192.168.1.50" required></label>
@@ -16,14 +43,9 @@
 <label class="field"><span class="label">Username</span><input name="username" value="admin"></label>
 <label class="field"><span class="label">Password</span><input type="password" name="password"></label>
 </div>
-<button type="submit" class="quiet">Discover</button>
+<button type="submit" class="quiet">Look up this address</button>
 </form>
-
-{{/* What the probe found, and which of it to pull. Every stream the
-     camera has is ticked: a camera added with no streams is the one
-     mistake this page can make that looks like success. */}}
 <div id="result"></div>
-
 <form id="add-camera" method="post" action="/cameras/add" hidden>
 <input type="hidden" name="address" id="add-address">
 <input type="hidden" name="username" id="add-username">
@@ -32,42 +54,122 @@
 <div id="streams" class="card"></div>
 <button type="submit">Add</button>
 </form>
+</details>
 
-<div class="card">
-<h2>Don't know the address?</h2>
-<p class="hint">reostream can try every address on your network and see which ones answer on
-port 9000, the port these cameras speak. It opens one connection to every address in the
-range, so it is something you start, never something that happens on its own. It takes
-about half a minute.</p>
-
-{{/* Editable, not fixed, and never a dead end. The detected ranges come
-     from this daemon's own interfaces, and in the shipped container those
-     are docker's bridge network, 172.17.0.0/24 rather than the network the
-     cameras are on. A container cannot know the operator's LAN, so the
-     detected values are offered as suggestions and the operator has the
-     last word. An earlier version rendered a fixed range with no way to
-     change it, which on the deployment this project actually ships was a
-     sweep of the wrong network with no recourse. */}}
-<form id="discover-form">
-<label class="field"><span class="label">Network to search</span>
-<input name="range" list="rangelist" value="{{if .Ranges}}{{index .Ranges 0}}{{end}}"
-  placeholder="192.168.1.0/24" required></label>
-<datalist id="rangelist">
-{{range .Ranges}}<option value="{{.}}">{{end}}
-</datalist>
-<p class="hint">A private range, no larger than a /24. The first guess is the network
-of the address you opened this page on. If your cameras are on a different network, type
-it here: the address of a camera you already have is the quickest way to know.</p>
-<button type="submit" class="quiet">Find cameras on this network</button>
-</form>
-<div id="discover-result"></div>
-</div>
-
-<p class="hint"><a href="/setup/urls">I have added my cameras, show me the URLs</a></p>
 </div>
 
 
 <script>
+// --- The automatic scan, on load -----------------------------------------
+//
+// The ranges to scan come from the server (the subnets it knows are the
+// operator's) plus whatever was last searched by hand in this browser.
+var discoverResult = document.getElementById('discover-result');
+
+function autoRanges() {
+  var ranges = [];
+  try { ranges = JSON.parse(discoverResult.dataset.auto || '[]'); } catch (e) { ranges = []; }
+  try {
+    var saved = localStorage.getItem('reostream.sweepRange');
+    if (saved && ranges.indexOf(saved) === -1) ranges.push(saved);
+  } catch (e) { /* private window; the server's ranges stand */ }
+  return ranges;
+}
+
+async function scan(ranges) {
+  if (!ranges.length) {
+    discoverResult.innerHTML = '<p class="hint">reostream does not know which network your ' +
+      'cameras are on yet. Add one by its address below, and the next visit will scan its ' +
+      'network automatically.</p>';
+    return;
+  }
+  var body = new URLSearchParams();
+  ranges.forEach(function (r) { body.append('range', r); });
+  discoverResult.innerHTML = '<p class="hint searching"><span class="spinner" aria-hidden="true"></span>' +
+    'Searching ' + ranges.map(function (r) { return '<code>' + r + '</code>'; }).join(', ') +
+    ' <span class="search-elapsed"></span></p>';
+  var started = Date.now();
+  var elapsed = discoverResult.querySelector('.search-elapsed');
+  var tick = setInterval(function () {
+    elapsed.textContent = Math.round((Date.now() - started) / 1000) + 's';
+  }, 1000);
+  try {
+    var resp = await fetch('/setup/discover', {method: 'POST', body: body});
+    discoverResult.innerHTML = await resp.text();
+  } catch (e) {
+    discoverResult.innerHTML = '<p class="outcome-refused">The scan could not be reached. ' +
+      'Reload the page to try again.</p>';
+  } finally {
+    clearInterval(tick);
+  }
+}
+
+scan(autoRanges());
+
+// --- A password for one camera that needed one ---------------------------
+//
+// The field has no name, so it never rode along with the add form. The
+// Connect button posts just this camera's address and password to
+// /setup/identify, and swaps the card for what comes back.
+document.addEventListener('click', async function (e) {
+  var button = e.target.closest('.cam-connect');
+  if (!button) return;
+  var card = button.closest('.found-camera');
+  var addr = card.dataset.address;
+  var passField = card.querySelector('.cam-pass');
+  var typed = passField ? passField.value : '';
+  var body = new URLSearchParams();
+  body.set('address', addr);
+  body.set('username', 'admin');
+  body.set('password', typed);
+  button.disabled = true;
+  var was = button.textContent;
+  button.textContent = 'Connecting…';
+  try {
+    var resp = await fetch('/setup/identify', {method: 'POST', body: body});
+    card.outerHTML = await resp.text();
+    // Carry the password the operator just typed into the card that came
+    // back, so Add sends it with this camera. The server never put it in
+    // the response (it must not); the page holds it and sets it here. If
+    // the camera still needs a password (wrong one), the replacement card
+    // has no such field and this is a no-op, leaving them to try again.
+    var fresh = discoverResult.querySelector('.found-camera[data-address="' + addr + '"]');
+    if (fresh) {
+      var hidden = fresh.querySelector('input[name="password.' + addr + '"]');
+      if (hidden) hidden.value = typed;
+    }
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = was;
+  }
+});
+
+// --- Search a different network, by hand ---------------------------------
+var discoverForm = document.getElementById('discover-form');
+discoverForm.addEventListener('submit', function (e) {
+  e.preventDefault();
+  var range = discoverForm.range.value.trim();
+  try { localStorage.setItem('reostream.sweepRange', range); } catch (e) { /* ignore */ }
+  scan([range]);
+});
+
+// --- Adding the ticked cameras, in one request ---------------------------
+document.addEventListener('submit', async function (e) {
+  var form = e.target.closest('#add-found');
+  if (!form) return;
+  e.preventDefault();
+  var body = new URLSearchParams(new FormData(form));
+  var button = form.querySelector('button');
+  button.disabled = true;
+  try {
+    var resp = await fetch('/setup/add-found', {method: 'POST', body: body});
+    discoverResult.innerHTML = await resp.text();
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// --- Add one camera by address (the fold-away) ---------------------------
 var probeForm = document.getElementById('probe-form');
 var result = document.getElementById('result');
 var add = document.getElementById('add-camera');
@@ -79,10 +181,10 @@ probeForm.addEventListener('submit', async function (e) {
   result.innerHTML = '<p class="hint">Asking the camera&hellip;</p>';
   var resp = await fetch('/setup/probe', {method: 'POST', body: body, headers: {'Accept': 'application/json'}});
   var found = await resp.json();
-  render(found);
+  renderProbe(found);
 });
 
-function render(found) {
+function renderProbe(found) {
   if (found.error) {
     result.innerHTML = '<p class="outcome-refused"></p>';
     result.querySelector('p').textContent = found.error;
@@ -90,6 +192,12 @@ function render(found) {
     return;
   }
   result.innerHTML = '';
+  if (found.services_enabled) {
+    var ok = document.createElement('p');
+    ok.className = 'outcome-accepted';
+    ok.textContent = 'Turned on RTSP, ONVIF and the web page on this camera, so your recorder (and any second lens) can reach it.';
+    result.appendChild(ok);
+  }
   streams.innerHTML = '<div class="discovered"></div>';
   var list = streams.firstChild;
   found.streams.forEach(function (s) {
@@ -113,40 +221,5 @@ function carryCredentials() {
   document.getElementById('add-password').value = probeForm.password.value;
   document.getElementById('add-name').value = probeForm.name.value;
 }
-
-var discoverForm = document.getElementById('discover-form');
-var discoverResult = document.getElementById('discover-result');
-if (discoverForm) {
-  discoverForm.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    var body = new URLSearchParams(new FormData(discoverForm));
-    // The sweep probes what it finds, and a probe needs a login, so it is
-    // given the same username and password typed above. They are used for
-    // the probe and nothing else.
-    body.set('username', probeForm.username.value);
-    body.set('password', probeForm.password.value);
-    var button = discoverForm.querySelector('button');
-    button.disabled = true;
-    discoverResult.innerHTML = '<p class="hint">Looking&hellip;</p>';
-    try {
-      var resp = await fetch('/setup/discover', {method: 'POST', body: body});
-      discoverResult.innerHTML = await resp.text();
-    } finally {
-      button.disabled = false;
-    }
-  });
-}
-
-// "Use this one" fills in the add-camera form from what the sweep already
-// learned, rather than probing the same camera a second time. It goes
-// through render() so the stream list is built once, in one place.
-document.addEventListener('click', function (e) {
-  var button = e.target.closest('.use-found');
-  if (!button) return;
-  probeForm.address.value = button.dataset.address;
-  var names = (button.dataset.streams || '').split(' ').filter(Boolean);
-  render({streams: names.map(function (n) { return {name: n, detail: ''}; })});
-  document.getElementById('add-label').focus();
-});
 </script>
 {{end}}

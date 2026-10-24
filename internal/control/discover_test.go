@@ -137,7 +137,7 @@ func TestACameraAlreadyInTheConfigIsNotOfferedAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := s.discover(context.Background(), p, "admin", "hunter2")
+	res := s.discover(context.Background(), []netip.Prefix{p}, "admin", "hunter2")
 
 	if res.Configured != 1 {
 		t.Errorf("Configured = %d, want 1: 127.0.0.2 answered and is already in the config", res.Configured)
@@ -169,7 +169,7 @@ func TestAnUnconfiguredCandidateGoesThroughTheExistingProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := s.discover(context.Background(), p, "admin", "hunter2")
+	res := s.discover(context.Background(), []netip.Prefix{p}, "admin", "hunter2")
 
 	for _, f := range res.Found {
 		if f.Address != "127.0.0.3" {
@@ -221,44 +221,49 @@ func TestASweepStopsWhenItsContextIsCancelled(t *testing.T) {
 	t.Fatalf("goroutines went from %d to %d across a cancelled sweep; dials were left running", before, runtime.NumGoroutine())
 }
 
-// The range is an instruction to open connections that somebody typed into
-// a form, so anything but a private or loopback range is refused. Without
-// this, a daemon reachable from anywhere is a port scanner for hire.
-func TestANonPrivateRangeIsRefused(t *testing.T) {
+// The only limits left on a range are its size and that it is a real IPv4
+// range. There is no longer an "is this yours" check: camera VLANs are
+// routinely built outside RFC1918, and the page exists to serve them.
+func TestOnlyOversizeOrMalformedRangesAreRefused(t *testing.T) {
 	refused := []string{
-		"8.8.8.0/24",     // public
-		"203.0.113.0/24", // documentation range, still public
-		"100.64.0.0/24",  // carrier-grade NAT: not RFC1918, not ours
-		"172.16.0.0/16",  // private but far too large
+		"192.168.0.0/16", // private but far too large
 		"10.0.0.0/8",     // likewise
+		"8.0.0.0/8",      // public and far too large
 		"::1/128",        // not IPv4
 		"not-a-range",    // not a range at all
-		"192.168.1.50",   // an address, with no prefix
 	}
 	for _, r := range refused {
 		t.Run(r, func(t *testing.T) {
 			if _, err := parseSweepRange(r); err == nil {
-				t.Fatalf("%s was accepted; only a private or loopback /24 or smaller may be swept", r)
+				t.Fatalf("%s was accepted; only an IPv4 range of /24 or smaller may be swept", r)
 			}
 		})
 	}
 
-	accepted := []string{"192.168.1.0/24", "10.4.5.0/24", "172.16.9.0/25", "127.0.0.0/24"}
+	// Private, loopback, public and non-RFC1918 /24s alike are accepted, as
+	// is a bare address (the /24 around it).
+	accepted := []string{
+		"192.168.1.0/24", "10.4.5.0/24", "172.16.9.0/25", "127.0.0.0/24", "192.168.1.50",
+		"8.8.8.0/24",      // public
+		"203.0.113.0/24",  // documentation range, still public
+		"100.64.0.0/24",   // carrier-grade NAT
+		"198.51.100.0/24", // documentation range, outside RFC1918
+	}
 	for _, r := range accepted {
 		t.Run(r, func(t *testing.T) {
 			if _, err := parseSweepRange(r); err != nil {
-				t.Fatalf("%s was refused (%v); it is a private or loopback range of an acceptable size", r, err)
+				t.Fatalf("%s was refused (%v); any IPv4 /24 or smaller is acceptable", r, err)
 			}
 		})
 	}
 }
 
-// The refusal reaches the operator through the handler too, not only
-// through the validator: a range that is refused must be told to the
-// person who typed it, and must not start a sweep.
-func TestTheHandlerRefusesANonPrivateRange(t *testing.T) {
+// A refusal that remains -- a range too big to sweep -- must reach the
+// operator through the handler, not only the validator: it must be told to
+// the person who typed it, as a readable page, and must not start a sweep.
+func TestTheHandlerRefusesATooBigRange(t *testing.T) {
 	s := newTestServer(t, Options{AllowNoPassword: true, ConfigPath: writeTestConfig(t, "one")})
-	body := url.Values{"range": {"8.8.8.0/24"}}.Encode()
+	body := url.Values{"range": {"10.0.0.0/8"}}.Encode()
 	req := httptest.NewRequest("POST", "/setup/discover", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -267,8 +272,57 @@ func TestTheHandlerRefusesANonPrivateRange(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("answered %d, want 200 with a refusal a person can read", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "not a private network") {
-		t.Fatalf("the page did not say why the range was refused: %s", rec.Body.String())
+	page := rec.Body.String()
+	if !strings.Contains(page, "larger than a /24") {
+		t.Fatalf("the page did not say why the range was refused: %s", page)
+	}
+}
+
+// A non-private range, by contrast, is now swept without any confirmation:
+// the handler must run it, not block on an "is this yours" prompt. Pointed
+// at loopback (which stands in for a camera VLAN here) so the test dials
+// nothing public.
+func TestTheHandlerSweepsANonPrivateRangeWithoutConfirming(t *testing.T) {
+	port := listenLoopback(t, "127.0.0.2")
+	s := newTestServer(t, Options{
+		AllowNoPassword: true,
+		ConfigPath:      writeTestConfig(t, "one"),
+		Probe:           stubReport("IPC"),
+	})
+	s.sweepPort = port
+
+	body := url.Values{"range": {loopbackRange}}.Encode()
+	req := httptest.NewRequest("POST", "/setup/discover", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	page := rec.Body.String()
+	if strings.Contains(page, "outside the usual private ranges") || strings.Contains(page, "Search it anyway") {
+		t.Fatalf("the handler still asks to confirm an ordinary range: %s", page)
+	}
+	if !strings.Contains(page, "Scanned") {
+		t.Fatalf("the handler did not run the scan: %s", page)
+	}
+}
+
+// The setup page carries the ranges it will scan on load, so the script can
+// fire the scan with nothing typed.
+func TestTheSetupPageCarriesItsAutoScanRanges(t *testing.T) {
+	s := newTestServer(t, Options{AllowNoPassword: true, ConfigPath: writeDiscoverConfig(t, "cam", "192.168.5.10")})
+	req := httptest.NewRequest("GET", "/setup", nil)
+	req.RemoteAddr = "192.168.5.20:5555"
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	page := rec.Body.String()
+	if !strings.Contains(page, "data-auto=") {
+		t.Fatalf("the setup page does not carry its auto-scan ranges: %s", page)
+	}
+	// The browser's own subnet and the configured camera's subnet are both
+	// there, so a scan on load covers both networks with nothing typed.
+	if !strings.Contains(page, "192.168.5.0/24") {
+		t.Errorf("the auto-scan ranges do not include the subnets in play: %s", page)
 	}
 }
 
@@ -408,24 +462,62 @@ func TestHostsInDropsNetworkAndBroadcast(t *testing.T) {
 	}
 }
 
-// In a container the interfaces are the container's own network. The
-// address the operator typed to reach this page is the host's, and the
-// cameras are almost always on that network, so it goes first.
-func TestTheAddressInTheBrowserIsOfferedFirst(t *testing.T) {
-	got := sweepRangesFor("192.168.1.50:8562")
-	if len(got) == 0 || got[0] != "192.168.1.0/24" {
-		t.Fatalf("ranges = %v, want 192.168.1.0/24 first", got)
+// A camera VLAN is often built on addresses that are not RFC1918 at all --
+// the fleet this was written for is one -- and the sweep used to refuse
+// those outright, so such an install could not use the page.
+//
+// Checking for a local interface in the range is not the fix either: the
+// daemon usually runs in a container on 172.17.0.0/16 and ROUTES to the
+// cameras, so it holds no address on their network and would refuse the very
+// deployment it exists to serve.
+func TestASweepOutsideThePrivateRangesIsAllowed(t *testing.T) {
+	// TEST-NET-1 stands in for the real one. What matters to this test is
+	// only that it is outside RFC1918, which it is.
+	const camVLAN = "192.0.2.0/24"
+
+	p, err := parseSweepRange(camVLAN)
+	if err != nil {
+		t.Fatalf("a non-private /24 was refused: %v", err)
 	}
-	for i, r := range got[1:] {
-		if r == got[0] {
-			t.Errorf("range %s offered twice (index %d)", r, i+1)
+	if p.String() != camVLAN {
+		t.Errorf("parsed as %s, want %s", p, camVLAN)
+	}
+}
+
+// Size is the one limit that is left, and it is about cost, not ownership:
+// a /16 is thousands of dials whoever it belongs to, so it is refused
+// whether it is private or not.
+func TestTheSizeBoundHoldsForEveryRange(t *testing.T) {
+	for _, r := range []string{"198.51.0.0/16", "10.0.0.0/8", "192.168.0.0/16"} {
+		if _, err := parseSweepRange(r); err == nil {
+			t.Errorf("%s was accepted; the size bound must hold regardless of ownership", r)
 		}
 	}
-	for _, host := range []string{"localhost:8562", "127.0.0.1:8562", "8.8.8.8:8562", "nvr.lan:8562", "[fd00::1]:8562"} {
-		for _, r := range sweepRangesFor(host) {
-			if strings.HasPrefix(r, "127.") || r == "8.8.8.0/24" {
-				t.Errorf("host %s offered %s", host, r)
-			}
+}
+
+// Private and loopback go through with nothing extra: the common case must
+// not grow a step.
+func TestPrivateRangesStillNeedNoConfirmation(t *testing.T) {
+	for _, r := range []string{"192.168.1.0/24", "10.1.2.0/24", "172.16.5.0/24", "127.0.0.0/24"} {
+		if _, err := parseSweepRange(r); err != nil {
+			t.Errorf("%s now needs confirming and should not: %v", r, err)
+		}
+	}
+}
+
+// In a container the daemon's own interfaces are the container's network;
+// the address the browser typed is the host's, where the cameras are.
+func TestHostSweepRangeIsThePagesOwnNetwork(t *testing.T) {
+	// A Tailscale-style address is a VPN, not the cameras' network.
+	vpn := netip.AddrFrom4([4]byte{100, 101, 102, 103}).String() + ":8562"
+	for host, want := range map[string]string{
+		"192.168.1.20:8562": "192.168.1.0/24",
+		"10.0.4.5":          "10.0.4.0/24",
+		vpn:                 "",
+		"reostream.lan":     "",
+	} {
+		if got := hostSweepRange(host); got != want {
+			t.Errorf("hostSweepRange(%q) = %q, want %q", host, got, want)
 		}
 	}
 }

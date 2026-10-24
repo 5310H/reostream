@@ -123,6 +123,8 @@ type Hub struct {
 	closed        bool
 	keyframeCodec string
 	keyframe      []byte
+	keyframeAt    time.Time
+	onDemand      bool
 
 	statsMu     sync.Mutex
 	stats       FrameStats
@@ -337,7 +339,25 @@ func (h *Hub) SetKeyframe(codec string, es []byte) {
 	h.mu.Lock()
 	h.keyframeCodec = codec
 	h.keyframe = es
+	h.keyframeAt = time.Now()
 	h.mu.Unlock()
+}
+
+// RestoreKeyframe puts back a keyframe saved before a restart, with the
+// time it was taken, so a sleeping camera still has its last picture.
+func (h *Hub) RestoreKeyframe(codec string, es []byte, at time.Time) {
+	h.mu.Lock()
+	if h.keyframe == nil {
+		h.keyframeCodec, h.keyframe, h.keyframeAt = codec, es, at
+	}
+	h.mu.Unlock()
+}
+
+// KeyframeAt is when the last keyframe arrived (zero if none has).
+func (h *Hub) KeyframeAt() time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.keyframeAt
 }
 
 // Keyframe returns the most recently recorded keyframe and its codec, or
@@ -452,4 +472,36 @@ func (h *Hub) Stats() FrameStats {
 	h.statsMu.Lock()
 	defer h.statsMu.Unlock()
 	return h.stats
+}
+
+// SetOnDemand marks a hub whose stream only runs while someone watches: a
+// battery camera's. See OnDemand.
+func (h *Hub) SetOnDemand(on bool) {
+	h.mu.Lock()
+	h.onDemand = on
+	h.mu.Unlock()
+}
+
+// OnDemand reports whether subscribing to this hub wakes a battery camera.
+// The public listeners refuse such a hub, so only a signed-in viewer can.
+func (h *Hub) OnDemand() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.onDemand
+}
+
+// Kick ends every current subscriber without closing the hub, so a
+// battery camera's session can be stopped while the hub, and the last
+// keyframe it holds, stays for the next wake.
+func (h *Hub) Kick() {
+	h.mu.Lock()
+	subs := make([]*subscriber, 0, len(h.subs))
+	for s := range h.subs {
+		subs = append(subs, s)
+		delete(h.subs, s)
+	}
+	h.mu.Unlock()
+	for _, s := range subs {
+		s.closeOnce()
+	}
 }

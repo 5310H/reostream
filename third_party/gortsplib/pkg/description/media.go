@@ -92,6 +92,9 @@ type Media struct {
 	// Control attribute.
 	Control string
 
+	// Frame rate, written as a framerate attribute when non-zero.
+	FrameRate float64
+
 	// Formats contained into the media.
 	Formats []format.Format
 }
@@ -204,6 +207,13 @@ func (m Media) Marshal() (*sdp.MediaDescription, error) {
 		Key:   "control",
 		Value: m.Control,
 	})
+
+	if m.FrameRate > 0 {
+		md.Attributes = append(md.Attributes, sdp.Attribute{
+			Key:   "framerate",
+			Value: strconv.FormatFloat(m.FrameRate, 'f', -1, 64),
+		})
+	}
 
 	for _, forma := range m.Formats {
 		typ := strconv.FormatUint(uint64(forma.PayloadType()), 10)

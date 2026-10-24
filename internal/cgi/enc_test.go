@@ -9,7 +9,10 @@ import (
 	"testing"
 )
 
-// A real GetEnc reply from a Duo 3, kept verbatim.
+// The pano's own answer, captured 2026-10-13. Kept verbatim rather than
+// tidied: the shape is the thing being tested, and the detail that matters
+// most -- the range being an ARRAY of whole combinations, one per
+// resolution -- is invisible in a reduced fixture.
 const panoEncValue = `{"Enc":{"audio":1,"channel":0,` +
 	`"mainStream":{"bitRate":10240,"frameRate":20,"gop":1,"height":1152,"profile":"High","size":"4096*1152","vType":"h265","width":4096},` +
 	`"subStream":{"bitRate":2048,"frameRate":20,"gop":1,"height":432,"profile":"High","size":"1536*432","vType":"h264","width":1536}}}`

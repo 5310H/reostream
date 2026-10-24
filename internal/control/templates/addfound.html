@@ -1,0 +1,18 @@
+{{define "addfound"}}
+{{if .Nothing}}
+<p class="hint">Nothing was ticked, so nothing was added.</p>
+{{else}}
+{{if .Added}}
+<p class="outcome-accepted">Added {{len .Added}}:</p>
+<ul class="hint">{{range .Added}}<li>{{.}}</li>{{end}}</ul>
+{{end}}
+{{if .Failed}}
+<p class="outcome-refused">{{len .Failed}} could not be added:</p>
+<ul class="hint">{{range .Failed}}<li><code>{{.Address}}</code> &mdash; {{.Reason}}</li>{{end}}</ul>
+{{end}}
+{{if .Added}}
+<p class="hint">They are streaming now. <a href="/">See them on the status page</a>, or
+<a href="/setup/urls">get the URLs for your recorder</a>. Search again above to add more.</p>
+{{end}}
+{{end}}
+{{end}}

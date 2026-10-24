@@ -57,7 +57,14 @@ const (
 
 // StreamStat reports one stream's current state for status endpoints.
 //
-// LastError is never cleared; LastErrorAt says when it happened.
+// LastError is history, not a diagnosis: it is the last error this stream
+// ever hit and is never cleared, because a stream that failed and recovered
+// is exactly what someone reading a status page needs to know about. That
+// makes it dangerous on its own, which is what LastErrorAt is for. On
+// 2026-10-16 a fisheye substream carried "camera is answering but not
+// sending media (held session)" from a single restart hours earlier while
+// streaming at 9.8 fps with a frame 0.1s old, and the stale sentence was
+// read as a live fault and reported as a dead feed.
 type StreamStat struct {
 	Camera      string
 	Stream      string
@@ -65,6 +72,9 @@ type StreamStat struct {
 	LastError   string
 	LastErrorAt time.Time
 	Restarts    int
+	// OnDemand marks a battery camera's stream, which is asleep rather
+	// than down when it is not running.
+	OnDemand bool
 }
 
 // entry is everything one goroutine in runStream needs for the one stream
@@ -76,6 +86,10 @@ type entry struct {
 	// which of a camera's streams an output was asked for.
 	rtsp []string
 	stat StreamStat
+
+	// onDemand is a battery camera's stream: run only while someone is
+	// watching, never held open. See runOnDemand.
+	onDemand bool
 
 	// cancel stops just this stream, and done closes once its goroutine has
 	// fully returned. Both exist so one stream can be replaced without
@@ -110,6 +124,14 @@ type Supervisor struct {
 	// builds sinks for cameras added after Run, and this is its only way to
 	// reach the output that wants them.
 	sinkFor func(camera, stream string) stream.FrameSink
+
+	// presenceFor gives a battery camera's on-demand main stream its sink:
+	// the presence stream, which a recorder reads without waking the
+	// camera. See AttachPresence.
+	presenceFor func(camera string, h *hub.Hub) stream.FrameSink
+
+	// stillDir keeps battery cameras' last pictures across restarts.
+	stillDir string
 
 	// runCtx is Run's context, the parent of every per-entry context, so a
 	// stream started after Run still stops when the process shuts down.
@@ -146,29 +168,48 @@ func New(cams []config.Camera, run Runner) *Supervisor {
 		entries:      make(map[string]*entry),
 	}
 	for _, cam := range cams {
-		for _, st := range cam.Streams {
+		streams, _ := cameraStreams(cam)
+		for _, st := range streams {
 			// One hub per camera+stream name so subscribers pick a specific
 			// feed; "driveway/main" and "driveway/sub" are unrelated feeds
 			// even though they share a camera.
-			h := hub.New(64)
-			name := hubName(cam.Name, st)
-			s.hubs[name] = h
-			s.entries[name] = &entry{
-				rtsp: cam.RTSP,
-				cfg: stream.Config{
-					Name:     cam.Name,
-					Address:  cam.Address,
-					Username: cam.Username,
-					Password: cam.Password,
-					Stream:   st,
-					Channel:  cam.Channel,
-				},
-				h:    h,
-				stat: StreamStat{Camera: cam.Name, Stream: st},
-			}
+			e := newEntry(cam, st)
+			s.hubs[hubName(cam.Name, st)] = e.h
+			s.entries[hubName(cam.Name, st)] = e
 		}
 	}
 	return s
+}
+
+// cameraStreams is the streams a camera runs. A battery camera that lists
+// none gets sub and main on demand: they exist so a viewer can wake it,
+// and run only while one is watching.
+func cameraStreams(cam config.Camera) (streams []string, onDemand bool) {
+	if len(cam.Streams) == 0 && cam.UID != "" {
+		return []string{"sub", "main"}, true
+	}
+	return cam.Streams, false
+}
+
+func newEntry(cam config.Camera, st string) *entry {
+	_, onDemand := cameraStreams(cam)
+	h := hub.New(64)
+	h.SetOnDemand(onDemand)
+	return &entry{
+		rtsp: cam.RTSP,
+		cfg: stream.Config{
+			Name:     cam.Name,
+			Address:  cam.Address,
+			Username: cam.Username,
+			Password: cam.Password,
+			Stream:   st,
+			Channel:  cam.Channel,
+			UID:      cam.UID,
+		},
+		h:        h,
+		stat:     StreamStat{Camera: cam.Name, Stream: st, OnDemand: onDemand},
+		onDemand: onDemand,
+	}
 }
 
 // CameraConfig returns the connection details the supervisor currently
@@ -208,9 +249,36 @@ func (s *Supervisor) AttachSinks(sinkFor func(camera, stream string) stream.Fram
 	s.mu.Unlock()
 }
 
+// AttachPresence gives each battery camera's main stream the sink built by
+// presenceFor. Call before Run, like AttachSinks.
+func (s *Supervisor) AttachPresence(presenceFor func(camera string, h *hub.Hub) stream.FrameSink) {
+	if s.started.Load() {
+		panic("supervisor: AttachPresence called after Run")
+	}
+	s.mu.Lock()
+	s.presenceFor = presenceFor
+	for _, e := range s.entries {
+		s.applySinkLocked(e)
+	}
+	s.mu.Unlock()
+}
+
 // applySinkLocked gives e a frame sink if its camera asked for this stream
 // over RTSP. Caller holds s.mu.
 func (s *Supervisor) applySinkLocked(e *entry) {
+	// A battery camera's on-demand stream never feeds RTSP directly: a
+	// recorder pulling it would hold the camera awake around the clock.
+	// Its main stream feeds the presence stream instead, which a recorder
+	// can hold open because it never reaches the camera.
+	if e.onDemand {
+		if s.presenceFor != nil && e.cfg.Stream == "main" {
+			// The hub goes in so the sink can read the camera's kept still
+			// without calling back into the supervisor, whose lock is
+			// held here.
+			e.cfg.Sink = s.presenceFor(e.cfg.Name, e.h)
+		}
+		return
+	}
 	if s.sinkFor == nil {
 		return
 	}
@@ -343,7 +411,8 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 
 	want := make(map[string]config.Camera)
 	for _, cam := range cams {
-		for _, st := range cam.Streams {
+		streams, _ := cameraStreams(cam)
+		for _, st := range streams {
 			want[hubName(cam.Name, st)] = cam
 		}
 	}
@@ -422,23 +491,13 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 	for _, key := range add {
 		cam := want[key]
 		st := strings.TrimPrefix(key, cam.Name+"/")
-		h := hub.New(64)
-		e := &entry{
-			rtsp: cam.RTSP,
-			cfg: stream.Config{
-				Name:     cam.Name,
-				Address:  cam.Address,
-				Username: cam.Username,
-				Password: cam.Password,
-				Stream:   st,
-				Channel:  cam.Channel,
-			},
-			h:    h,
-			stat: StreamStat{Camera: cam.Name, Stream: st},
+		e := newEntry(cam, st)
+		if e.onDemand {
+			loadStill(s.stillDir, e)
 		}
 		s.applySinkLocked(e)
 		s.entries[key] = e
-		s.hubs[key] = h
+		s.hubs[key] = e.h
 		s.startLocked(e)
 		if !replacing[key] {
 			res.Added++
@@ -457,8 +516,11 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 // list: a camera gaining an RTSP entry for its sub stream is no reason to
 // drop and rebuild its main stream's camera connection.
 func sameStream(e *entry, cam config.Camera) bool {
-	return e.cfg.Address == cam.Address &&
+	_, onDemand := cameraStreams(cam)
+	return e.onDemand == onDemand &&
+		e.cfg.Address == cam.Address &&
 		e.cfg.Channel == cam.Channel &&
+		e.cfg.UID == cam.UID &&
 		e.cfg.Username == cam.Username &&
 		e.cfg.Password == cam.Password &&
 		slices.Contains(cam.RTSP, e.cfg.Stream) == slices.Contains(e.rtsp, e.cfg.Stream)
@@ -557,6 +619,10 @@ func (s *Supervisor) stopEntry(e *entry) {
 // stream, and a second one gets a session that delivers nothing and blocks
 // its own replacement until the camera times the dead one out.
 func (s *Supervisor) runStream(ctx context.Context, e *entry) {
+	if e.onDemand {
+		s.runOnDemand(ctx, e)
+		return
+	}
 	backoff := s.backoffStart
 	for {
 		if ctx.Err() != nil {

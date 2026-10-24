@@ -43,7 +43,7 @@ func renderCameraPageWithOSD(t *testing.T, osdBody string) string {
 	t.Helper()
 	key := baichuan.AESKey(testProbeNonce, "")
 	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>128</bright><contrast>128</contrast><saturation>128</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode></DayNight></InputAdvanceCfg></body>`
-	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state></LedState></body>`
+	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state><lightState>open</lightState></LedState></body>`
 
 	fixture := loginHandshake(testProbeNonce, testProbeDeviceInfo)
 	fixture = append(fixture, statusReply(t, key, mustPair(t, "osd get").Get, 200, testXMLHeader+osdBody)...)
@@ -58,7 +58,7 @@ func renderCameraPageWithOSD(t *testing.T, osdBody string) string {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/cameras/cam1")
+	resp, err := http.Get(ts.URL + "/cameras/cam1/settings/overlay")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestPositionSelectIsSeededFromTheCamerasOwnPair(t *testing.T) {
 	// own server.
 	t.Parallel()
 	html := renderCameraPageWithOSD(t, `<body>`+
-		`<OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName>`+
+		`<OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>0</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName>`+
 		`<OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>65536</topLeftX><topLeftY>1</topLeftY></OsdDatetime>`+
 		`</body>`)
 
@@ -122,7 +122,7 @@ func TestPositionSelectIsSeededFromTheCamerasOwnPair(t *testing.T) {
 			t.Errorf("the position select does not offer %q", want)
 		}
 	}
-	if strings.Contains(html, "never seen a camera use") {
+	if strings.Contains(html, "an unnamed position") {
 		t.Errorf("a pair straight out of the corner table was reported as unrecognised:\n%s", html)
 	}
 	if strings.Contains(html, "not available:") {
@@ -139,11 +139,11 @@ func TestPositionSelectIsSeededFromTheCamerasOwnPair(t *testing.T) {
 func TestUnrecognisedPositionIsShownNotSnapped(t *testing.T) {
 	t.Parallel() // see the note on the test above
 	html := renderCameraPageWithOSD(t, `<body>`+
-		`<OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName>`+
+		`<OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>0</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName>`+
 		`<OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>32768</topLeftX><topLeftY>9</topLeftY></OsdDatetime>`+
 		`</body>`)
 
-	if !strings.Contains(html, "This camera holds 32768,9") {
+	if !strings.Contains(html, "Currently 32768,9") {
 		t.Fatalf("an unrecognised position was not shown as the camera's own pair:\n%s", html)
 	}
 	// Snapping would have selected a corner instead. The timestamp's pair
@@ -154,7 +154,7 @@ func TestUnrecognisedPositionIsShownNotSnapped(t *testing.T) {
 			t.Errorf("an unrecognised position was snapped to the %s corner:\n%s", corner, html)
 		}
 	}
-	if !strings.Contains(html, "never seen a camera use") {
+	if !strings.Contains(html, "an unnamed position") {
 		t.Errorf("the page does not say why this position has no name:\n%s", html)
 	}
 	if !strings.Contains(html, `value="1,1"><span>top left</span>`) {
@@ -338,5 +338,27 @@ func TestBothHalvesOfAPositionAreCurated(t *testing.T) {
 	}
 	if _, ok := curatedField("osd get", "OsdDatetime/width"); ok {
 		t.Error("a field groups() never declared resolved as curated")
+	}
+}
+
+// The name and the timestamp cannot share a corner, so the corner the
+// other one holds is greyed out; not when the other one is hidden.
+func TestTheOtherOverlaysCornerIsGreyedOut(t *testing.T) {
+	name := Field{XPath: "OsdChannelName/topLeftX", YPath: "OsdChannelName/topLeftY", Kind: "position"}
+	p := cameraPage{Values: map[string]string{
+		"OsdChannelName/topLeftX": osdFarEdge, "OsdChannelName/topLeftY": osdFarEdge, // bottom right
+		"OsdDatetime/topLeftX": osdNearEdge, "OsdDatetime/topLeftY": osdFarEdge, // bottom left
+		"OsdDatetime/enable": "1",
+	}}
+	for _, o := range p.Position(name).Options {
+		if (o.Label == "bottom left") != (o.Taken != "") {
+			t.Errorf("%s taken=%q", o.Label, o.Taken)
+		}
+	}
+	p.Values["OsdDatetime/enable"] = "0"
+	for _, o := range p.Position(name).Options {
+		if o.Taken != "" {
+			t.Errorf("%s greyed out while the timestamp is hidden", o.Label)
+		}
 	}
 }

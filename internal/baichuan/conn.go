@@ -7,6 +7,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/VoltTech21/reostream/internal/bcudp"
 )
 
 // Options configures a connection.
@@ -14,6 +16,10 @@ type Options struct {
 	Username string
 	Password string
 	Channel  int
+
+	// UID, when set, reaches a battery camera over UDP (see docs/udp.md)
+	// instead of TCP port 9000.
+	UID string
 
 	// IdleTimeout bounds how long a read may wait for the camera to send
 	// anything before Conn gives up on it. Zero means DefaultIdleTimeout.
@@ -99,13 +105,19 @@ func (c *idleTimeoutConn) Read(b []byte) (int, error) {
 }
 
 // Dial connects to a camera and logs in. addr may omit the port, in which
-// case 9000 is used.
+// case 9000 is used. With opts.UID set, addr is a battery camera reached over UDP.
 func Dial(ctx context.Context, addr string, opts Options) (*Conn, error) {
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		addr = net.JoinHostPort(addr, "9000")
+	var nc net.Conn
+	var err error
+	if opts.UID != "" {
+		nc, err = bcudp.Dial(ctx, addr, opts.UID)
+	} else {
+		if _, _, serr := net.SplitHostPort(addr); serr != nil {
+			addr = net.JoinHostPort(addr, "9000")
+		}
+		var d net.Dialer
+		nc, err = d.DialContext(ctx, "tcp", addr)
 	}
-	var d net.Dialer
-	nc, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("baichuan: dial %s: %w", addr, err)
 	}
@@ -258,12 +270,29 @@ func (c *Conn) readLoop() {
 			c.readMu.Unlock()
 			return
 		}
+		if m.Header.MsgID == MsgIDKeepAlive {
+			c.answerKeepAlive(m.Header)
+			continue
+		}
 		select {
 		case c.msgs <- m:
 		case <-c.done:
 			return
 		}
 	}
+}
+
+// answerKeepAlive replies to a battery camera's message 234, which ends the
+// session about 10 s in if unanswered.
+func (c *Conn) answerKeepAlive(in Header) {
+	h := Header{
+		MsgID:     MsgIDKeepAlive,
+		Class:     ClassModern24,
+		EncOffset: in.EncOffset,
+		EncByte:   200,
+		DirByte:   0,
+	}
+	_ = c.w.Write(h, nil)
 }
 
 // Messages yields every message the camera sends after login.
@@ -457,6 +486,18 @@ func (c *Conn) SetConfig(msgID uint32, body []byte) error {
 		EncOffset: EncOffsetFor(byte(c.opts.Channel), 0, c.nextCounter(), 0),
 	}
 	return c.w.WriteParts(h, ext, body)
+}
+
+// SendDocument sends msgID carrying body as a single section with a zero
+// PayloadOff: the whole body is the document and there is no extension. The
+// netport GET uses it to send an empty request.
+func (c *Conn) SendDocument(msgID uint32, body []byte) error {
+	h := Header{
+		MsgID:     msgID,
+		Class:     ClassModern24,
+		EncOffset: EncOffsetFor(byte(c.opts.Channel), 0, c.nextCounter(), 0),
+	}
+	return c.w.Write(h, body)
 }
 
 // heartBeatTwoPart selects the message shape, for the experiment that

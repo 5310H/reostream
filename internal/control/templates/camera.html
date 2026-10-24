@@ -1,88 +1,203 @@
 {{/*
-  camera.html: one camera, two columns. cameraPage (camerapage.go) still
-  supplies exactly what it did: this camera's stream state and tile
-  (Group), the curated settings (Groups, from settings.go), the floodlight
-  (its write goes over CGI, not a Baichuan block), and what the camera
-  reports about itself.
-
-  What changed:
-
-    - the raw xpath under each label is gone. This page changes settings;
-      it is not a view of the protocol. The message ids live on Advanced.
-    - a Kind "toggle" renders as a switch, not a two-option dropdown.
-    - a field whose switch is off is dimmed and disabled, via the
-      data-governs attribute settings.js reads.
-    - a group whose write interrupts the stream says so in its heading.
-      ConfirmReason still gates the submit.
-    - the three reference tables stay below the controls, closed.
+  camera.html: one camera, in the redesign's shell (camshell.html): the
+  Live tab (Head.Tab "live") or one category of the Settings tab (Cat).
+  cameraPage (camerapage.go) carries only what that view read.
 */}}
 {{define "body"}}
-<h1>{{.Camera.Name}}</h1>
-<p class="subtitle"><a class="camaddr" href="http://{{.Camera.Address}}" target="_blank" rel="noopener noreferrer" title="open {{.Camera.Address}} in a new tab">{{.Camera.Address}}</a></p>
-
-<nav class="tabs">
-<a href="/cameras/{{.Camera.Name}}" aria-current="page">Overview</a>
-<a href="/cameras/{{.Camera.Name}}/advanced">Advanced</a>
-<a href="/cameras/{{.Camera.Name}}/time">Time</a>
-<a href="/cameras/{{.Camera.Name}}/accounts">Accounts</a>
-</nav>
-
+{{if eq .Head.Tab "live"}}
+{{template "camhead" .Head}}
 {{template "flash" .Flash}}
-
-<div class="camera-cols">
-<div>
-
-<div class="card camcard">
-{{template "cameravideo" .Group}}
-<div class="camcard-body">
-<div class="streams">
-{{range .Group.Rows}}
-{{$stream := streamOf .Name}}
-<div class="streamline">
-<span class="stream-name"><span class="dot state-{{.State}}" style="background:currentColor"></span>{{$stream}}</span>
-{{/* Clients and restarts left this line for the same reason they left the
-     status page's: "0c 0r" reads as a fault code and is not one. */}}
-<span>{{printf "%.1f" .FPS}} fps</span>
-<span>{{.MbpsBitrate}} Mb</span>
+<div class="live-bar">
+<span class="live-bar-label">Stream</span>
+<div class="seg live-streams" role="radiogroup" aria-label="Stream">
+{{range .Streams}}<button type="button" role="radio" class="seg-opt{{if not .Playable}} struck{{end}}" data-stream="{{.Name}}" data-url="{{.URL}}" data-fps="{{printf "%.1f" .FPS}}" data-mb="{{.Mbps}}" data-codec="{{.Codec}}"{{if not .Playable}} disabled title="{{if .Codec}}{{.Codec}}{{else}}no video yet{{end}}: this browser can't play it"{{end}}>{{.Name}}</button>{{end}}
 </div>
-{{with index $.StreamURLs $stream}}
-<div class="streamurl">
-<code>{{.}}</code>
-<button type="button" class="linkish copy-btn" data-copy="{{.}}">copy</button>
+<span class="live-bar-note" id="live-note"></span>
+<span class="live-bar-stats mono" id="live-stats"></span>
 </div>
+
+<div class="live-grid">
+<div class="live-main">
+<div class="live-player" data-camera="{{.Camera.Name}}"{{if .Battery}} data-battery="1"{{end}}>
+<video muted playsinline controls hidden></video>
+<span class="live-tag" hidden><span class="dot"></span>LIVE</span>
+<button type="button" class="live-full" id="live-full" aria-label="Fullscreen" title="Fullscreen"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+<p class="live-empty"{{if .Streams}} hidden{{end}}>No video from this camera yet.</p>
+{{if .Battery}}<p class="hint live-battery">Battery camera: awake only while this tab is open, for up to 5 minutes at a time.</p>{{end}}
+</div>
+</div>
+
+<aside class="live-side">
+{{if and .Support .Support.HasPTZ}}
+<section class="ptz-card" data-camera="{{.Camera.Name}}">
+<div class="sec-head"><h2>Pan and tilt</h2></div>
+<div class="ptz-pad">
+<button type="button" class="ptz-btn ptz-up" data-cmd="up" aria-label="Tilt up">&#9650;</button>
+<button type="button" class="ptz-btn ptz-left" data-cmd="left" aria-label="Pan left">&#9664;</button>
+<span class="ptz-hub"></span>
+<button type="button" class="ptz-btn ptz-right" data-cmd="right" aria-label="Pan right">&#9654;</button>
+<button type="button" class="ptz-btn ptz-down" data-cmd="down" aria-label="Tilt down">&#9660;</button>
+</div>
+<label class="ptz-speed"><span>Speed</span>
+<input type="range" id="ptz-speed" min="{{.PTZ.SpeedMin}}" max="{{.PTZ.SpeedMax}}" value="{{.PTZ.Speed}}">
+<output for="ptz-speed" class="mono">{{.PTZ.Speed}}</output></label>
+<div class="ptz-presets">
+{{range .PTZ.Presets}}<button type="button" class="ptz-preset" data-id="{{.ID}}"><span>{{.Name}}</span><span class="mono">#{{.ID}}</span></button>{{end}}
+{{if .PTZ.PresetErr}}<p class="hint">Presets: {{.PTZ.PresetErr}}</p>{{end}}
+<form class="ptz-save" data-id="{{.PTZ.NextPresetID}}">
+<input type="text" name="name" placeholder="Name this view" maxlength="32" aria-label="Preset name">
+<button type="submit" class="quiet">+ Save as preset</button>
+</form>
+</div>
+<p class="hint ptz-note" aria-live="polite"></p>
+</section>
 {{end}}
+{{if and .Support .Support.CanTalk}}
+<section id="talk" class="talk-card">
+<div class="talk-row">
+<button type="button" id="talk-button" class="talk-mic" data-camera="{{.Camera.Name}}" aria-label="Hold to talk">
+<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+</button>
+<div><p class="talk-title">Hold to talk</p><p class="hint" id="talk-status" aria-live="polite">Hold the button and speak.</p></div>
+</div>
+</section>
 {{end}}
+
+<div class="quick">
+<button type="button" class="quick-btn" id="live-snap" disabled>
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+<span>Snapshot</span></button>
+<button type="button" class="quick-btn" id="live-copy" aria-expanded="false" aria-controls="live-urls"{{if not .CopyURLs}} disabled{{end}}>
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>
+<span>Copy URL</span></button>
+{{if .Dewarp}}<a class="quick-btn" href="/cameras/{{.Camera.Name}}/view">
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4v16"/></svg>
+<span>Dewarp</span></a>{{end}}
+{{if .HasFloodlight}}<button type="button" class="quick-btn" id="live-flood" data-camera="{{.Camera.Name}}" aria-pressed="{{if eq .FloodlightCurrent "on"}}true{{else}}false{{end}}" data-was="{{if eq .FloodlightCurrent "on"}}off{{else}}{{.FloodlightCurrent}}{{end}}">
+<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
+<span>Floodlight</span></button>{{end}}
 </div>
+<p class="hint live-msg" id="live-msg" aria-live="polite"></p>
+<div class="live-urls" id="live-urls" hidden>
+{{range .CopyURLs}}<button type="button" class="live-url" data-copy="{{.URL}}"><span class="live-url-label">{{.Label}}</span><code>{{.URL}}</code><span class="live-url-done">copy</span></button>{{end}}
+</div>
+</aside>
+</div>
+
+
+<script src="/assets/mpegts.js"></script>
+<script src="/assets/snapshot.js"></script>
+<script src="/assets/live.js"></script>
+<script src="/assets/talk.js"></script>
+
+{{else}}
+{{template "camsettings-open" .Head}}
+{{template "flash" .Flash}}
+{{if .CGIErr}}<p class="outcome-refused">{{.CGIErr}}</p>{{end}}
+
+{{range $i, $group := .Groups}}{{template "settingsgroup" dict "G" $group "P" $ "Preview" (and (eq $i 0) (or (eq $.Cat "image") (eq $.Cat "overlay")))}}{{end}}
+
+{{if eq .Cat "streams"}}
+{{if .Encoding.Have}}
+{{$enc := .Encoding}}
+{{$main := .Encoding.MainOptionsFor .Encoding.Current.Main.Size}}
+{{$sub := .Encoding.SubOptionsFor .Encoding.Current.Sub.Size}}
+<section id="encoding" data-options="{{.Encoding.OptionsJSON}}">
+<div class="sec-head">
+<h2>Encoding</h2>
+</div>
+{{if .Encoding.Err}}<p class="outcome-refused">{{.Encoding.Err}}</p>{{end}}
+<form class="control" method="post" action="/cameras/{{.Camera.Name}}/encoding" onsubmit="return confirm('{{.Encoding.Confirm}}')">
+
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-main-size">Main resolution</label></p>
+<div class="control">
+<select id="enc-main-size" name="main_size">
+{{range $enc.MainSizes}}<option value="{{.}}"{{if eq . $enc.Current.Main.Size}} selected{{end}}>{{.}}</option>{{end}}
+</select>
+<span class="hint">{{$enc.Current.Main.VType}}</span>
 </div>
 </div>
 
-{{/* The first curated group sits in the left column under the tile, so
-     the page is not one tall stack beside an empty half. */}}
-{{range $i, $group := .Groups}}{{if eq $i 0}}{{template "settingsgroup" dict "G" $group "P" $}}{{end}}{{end}}
-
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-main-bitrate">Main bitrate</label>{{template "info" "Higher is sharper and uses more storage."}}</p>
+<div class="control">
+<select id="enc-main-bitrate" name="main_bitrate">
+{{range $main.BitRates}}<option value="{{.}}"{{if eq . $enc.Current.Main.BitRate}} selected{{end}}>{{.}} kbps</option>{{end}}
+</select>
 </div>
-<div>
+</div>
 
-{{range $i, $group := .Groups}}{{if ne $i 0}}{{template "settingsgroup" dict "G" $group "P" $}}{{end}}{{end}}
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-main-framerate">Main frame rate</label></p>
+<div class="control">
+<select id="enc-main-framerate" name="main_framerate">
+{{range $main.FrameRates}}<option value="{{.}}"{{if eq . $enc.Current.Main.FrameRate}} selected{{end}}>{{.}} fps</option>{{end}}
+</select>
+</div>
+</div>
 
-{{/*
-  The floodlight is not a Group field: its write goes over CGI
-  (SetWhiteLed), because message 288 is known inert on this firmware.
-  Same confirm-every-time rule as Lights and IR.
-*/}}
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-main-gop">Main interframe space</label>{{template "info" "Frames between keyframes. Lower recovers faster after a dropout but uses more data."}}</p>
+<div class="control">
+<input type="number" id="enc-main-gop" name="main_gop" step="1"
+ min="{{$main.GOPMin}}" max="{{$main.GOPMax}}" value="{{$enc.Current.Main.GOP}}">
+<span class="hint">{{$main.GOPMin}} to {{$main.GOPMax}}</span>
+</div>
+</div>
+
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-sub-bitrate">Sub bitrate</label></p>
+<div class="control">
+<select id="enc-sub-bitrate" name="sub_bitrate">
+{{range $sub.BitRates}}<option value="{{.}}"{{if eq . $enc.Current.Sub.BitRate}} selected{{end}}>{{.}} kbps</option>{{end}}
+</select>
+<span class="hint">{{$enc.Current.Sub.Size}} {{$enc.Current.Sub.VType}}</span>
+</div>
+</div>
+
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-sub-framerate">Sub frame rate</label></p>
+<div class="control">
+<select id="enc-sub-framerate" name="sub_framerate">
+{{range $sub.FrameRates}}<option value="{{.}}"{{if eq . $enc.Current.Sub.FrameRate}} selected{{end}}>{{.}} fps</option>{{end}}
+</select>
+</div>
+</div>
+
+<div class="setting">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span><label for="enc-sub-gop">Sub interframe space</label></p>
+<div class="control">
+<input type="number" id="enc-sub-gop" name="sub_gop" step="1"
+ min="{{$sub.GOPMin}}" max="{{$sub.GOPMax}}" value="{{$enc.Current.Sub.GOP}}">
+<span class="hint">{{$sub.GOPMin}} to {{$sub.GOPMax}}</span>
+</div>
+</div>
+
+<div class="control buttonrow">
+<button type="submit">Save</button>
+<button type="button" class="quiet" id="enc-revert"
+ title="put back the values this page was opened with">&#8634; Revert</button>
+<span class="hint" id="enc-note"></span>
+</div>
+</form>
+</section>
+{{end}}
+
+{{if not .Encoding.Have}}{{if .Encoding.Err}}<section><div class="sec-head"><h2>Encoding</h2></div><p class="outcome-refused">{{.Encoding.Err}}</p></section>{{end}}{{end}}
+{{end}}
+
+{{if eq .Cat "view"}}
 {{if .HasFishEye}}
 <section>
-<div style="display:flex;align-items:baseline;gap:8px">
+<div class="sec-head">
 <h2>View</h2>
 </div>
-<p class="hint">What the camera does with the circle its lens sees, before it encodes
-anything. It dewarps far better than anything downstream can, so this is the place to
-choose. <strong>Changing it reboots the camera</strong>, which takes about twenty
-seconds, and leaves every motion mask and detection zone on this camera pointing at the
-wrong part of the picture.</p>
+<p class="hint">Changes what the camera records. To only change what you see, use <a href="/cameras/{{.Camera.Name}}/view">Dewarp</a>.</p>
+{{with .Group.Tile}}{{if .Playable}}<div class="wide-preview"><p class="sec-preview-head"><span class="live-dot"></span>LIVE <span class="hint">sub stream</span></p><div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div></div>{{end}}{{end}}
 {{if .FishEyeErr}}<p class="outcome-refused">{{.FishEyeErr}}</p>{{end}}
 <div class="setting">
-<p>Picture</p>
+<p><span class="tier tier-reboot" title="Saving this restarts the camera"></span>Picture</p>
 <form class="control" method="post" action="/cameras/{{.Camera.Name}}/fisheye" onsubmit="return confirm('{{.FishEyeConfirm}}')">
 <div class="segmented" role="radiogroup" aria-label="Fisheye view">
 {{$currentView := .FishEyeCurrent}}
@@ -94,104 +209,308 @@ wrong part of the picture.</p>
 </section>
 {{end}}
 
-{{if .HasFloodlight}}
+{{end}}
+
+{{if eq .Cat "stitch"}}
+{{if .HasStitch}}
 <section>
-<div style="display:flex;align-items:baseline;gap:8px">
-<h2>Lights</h2>
+<div class="sec-head">
+<h2>Lens alignment</h2>
+<a href="/cameras/{{.Camera.Name}}/align">Align against the picture &rarr;</a>
 </div>
-<p class="hint">These switch a real light on the camera the moment you pick one. reostream asks again first.</p>
-{{if .FloodlightErr}}<p class="outcome-refused">{{.FloodlightErr}}</p>{{end}}
+{{with .Group.Tile}}{{if .Playable}}<div class="wide-preview"><p class="sec-preview-head"><span class="live-dot"></span>LIVE <span class="hint">sub stream</span></p><div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div></div>{{end}}{{end}}
+{{/* The boxes only when the numbers in them came from the camera. A failed
+     read leaves three zeros and a zero range, and the reset buttons would
+     carry 0 as the factory value -- so the form would offer to set this
+     camera to zero and call it the factory alignment. */}}
+{{if .StitchErr}}<p class="outcome-refused">{{.StitchErr}}</p>
+{{else}}
+<form class="control autosave" method="post" action="/cameras/{{.Camera.Name}}/stitch">
 <div class="setting">
-<p>Floodlight</p>
-<form class="control" method="post" action="/cameras/{{.Camera.Name}}/floodlight" onsubmit="return confirm('{{.FloodlightConfirm}}')">
-{{/* Four stops, like an overlay's corner. Picking one submits through
-     the form's own onsubmit, so the confirmation still comes first, and a
-     cancelled confirmation puts the previous stop back. */}}
-<div class="segmented" role="radiogroup" aria-label="Floodlight">
-{{$currentFloodlight := .FloodlightCurrent}}
-{{range .FloodlightOptions}}<label><input type="radio" name="option" value="{{.Value}}"{{if eq .Value $currentFloodlight}} checked{{end}}><span>{{.Value}}</span></label>{{end}}
+<p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span><label for="st-distance">Focus distance</label>{{template "info" "The distance where the two lenses line up. Nearer things double, farther things clip."}}</p>
+<div class="control">
+<input type="number" id="st-distance" name="distance" step="0.1"
+ min="{{.Stitch.MinDistance}}" max="{{.Stitch.MaxDistance}}" value="{{.Stitch.Distance}}">
+<span class="hint">{{.Stitch.MinDistance}} to {{.Stitch.MaxDistance}}, {{.Stitch.FacDistance}} from the factory</span>
+<button type="button" class="linkish stitch-reset" data-target="st-distance" data-value="{{.Stitch.FacDistance}}" title="reset focus distance to the factory value" aria-label="reset focus distance to the factory value">&#8634;</button>
 </div>
-<noscript><button type="submit">set</button></noscript>
+</div>
+<div class="setting">
+<p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span><label for="st-x">Horizontal nudge</label>{{template "info" "For a seam that is off by the same amount everywhere."}}</p>
+<div class="control">
+<input type="number" id="st-x" name="x" step="1"
+ min="{{.Stitch.MinX}}" max="{{.Stitch.MaxX}}" value="{{.Stitch.X}}">
+<span class="hint">{{.Stitch.MinX}} to {{.Stitch.MaxX}}, {{.Stitch.FacX}} from the factory</span>
+<button type="button" class="linkish stitch-reset" data-target="st-x" data-value="{{.Stitch.FacX}}" title="reset horizontal nudge to the factory value" aria-label="reset horizontal nudge to the factory value">&#8634;</button>
+</div>
+</div>
+<div class="setting">
+<p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span><label for="st-y">Vertical nudge</label></p>
+<div class="control">
+<input type="number" id="st-y" name="y" step="1"
+ min="{{.Stitch.MinY}}" max="{{.Stitch.MaxY}}" value="{{.Stitch.Y}}">
+<span class="hint">{{.Stitch.MinY}} to {{.Stitch.MaxY}}, {{.Stitch.FacY}} from the factory</span>
+<button type="button" class="linkish stitch-reset" data-target="st-y" data-value="{{.Stitch.FacY}}" title="reset vertical nudge to the factory value" aria-label="reset vertical nudge to the factory value">&#8634;</button>
+</div>
+</div>
+{{/* Two different kinds of undo, because they answer different questions.
+     Revert puts back what the camera held when this page was drawn, which is
+     what somebody wants after nudging a seam and losing track of where they
+     started. Factory is the camera's own shipped value, for when the nudging
+     has gone far enough wrong that "before" is not far enough back. */}}
+<div class="control buttonrow">
+<button type="button" class="quiet" id="stitch-revert"
+ data-distance="{{.Stitch.Distance}}" data-x="{{.Stitch.X}}" data-y="{{.Stitch.Y}}"
+ title="put back the values this page was opened with">&#8634; Revert</button>
+<button type="button" class="quiet" id="stitch-factory"
+ data-distance="{{.Stitch.FacDistance}}" data-x="{{.Stitch.FacX}}" data-y="{{.Stitch.FacY}}"
+ title="back to the camera's factory alignment">&#8634; Factory</button>
+<span class="hint" id="stitch-note"></span>
+</div>
+</form>
+{{end}}
+</section>
+{{end}}
+
+{{end}}
+
+
+{{if eq .Cat "audio"}}
+{{if .Encoding.Have}}
+<section>
+<div class="sec-head"><h2>Microphone</h2><span class="sec-where">on camera</span></div>
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/encoding" onsubmit="return confirm('This restarts the stream for a few seconds. ' + (this.audio.value === '1' ? 'Turn the microphone on?' : 'Turn the microphone off?'))">
+<p><span class="tier tier-interruption" title="Saving this briefly interrupts the stream"></span>Record audio{{template "info" "Off sends silence to every recorder."}}</p>
+<div class="control">
+<input type="hidden" name="audio" value="{{.Encoding.Current.Audio}}">
+<button type="button" class="switch" data-field="audio" aria-pressed="{{if eq .Encoding.Current.Audio 1}}true{{else}}false{{end}}" aria-label="Record audio"><span class="knob"></span></button>
+</div>
+</form>
+</section>
+{{end}}
+{{if .Siren.Have}}
+<section id="sound">
+<div class="sec-head">
+<h2>Sound</h2>
+</div>
+{{if .Siren.Err}}<p class="outcome-refused">{{.Siren.Err}}</p>{{end}}
+<form class="control autosave" method="post" action="/cameras/{{.Camera.Name}}/siren">
+<div class="setting">
+<p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span>Speaker volume{{template "info" "Also how loud talk comes out."}}</p>
+<div class="control">
+{{/* The same slider-and-box pair the number fields use, so it is wired by
+     settings.js rather than by anything new: the box is what posts, the
+     track is the convenience. Here the camera DOES report its range, so
+     the track is the camera's own, and the server checks the box against
+     it again because a typed number is not clamped to the track. */}}
+<span class="slider">
+<input type="range" class="slider-range" id="siren-volume" aria-label="Speaker volume slider"
+  min="{{.Siren.VolumeMin}}" max="{{.Siren.VolumeMax}}" step="1" value="{{.Siren.Volume}}">
+<input type="number" class="slider-box" name="volume" value="{{.Siren.Volume}}">
+</span>
+</div>
+</div>
+{{if .Siren.HaveAlarm}}
+<div class="setting">
+<p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span>Sound the alarm on detection{{template "info" "Uses the schedule set in the Reolink app."}}</p>
+<div class="control">
+<div class="segmented" role="radiogroup" aria-label="Alarm sound">
+<label><input type="radio" name="alarm" value="on"{{if .Siren.AlarmOn}} checked{{end}}><span>on</span></label>
+<label><input type="radio" name="alarm" value="off"{{if not .Siren.AlarmOn}} checked{{end}}><span>off</span></label>
+</div>
+</div>
+</div>
+{{end}}
+</form>
+</section>
+{{end}}
+
+{{if not .Siren.Have}}<section><div class="sec-head"><h2>Sound</h2></div><p class="hint">No speaker settings on this camera.</p></section>{{end}}
+{{end}}
+
+{{if eq .Cat "network"}}
+<section>
+<div class="sec-head"><h2>Network services</h2><span class="sec-where">on camera</span></div>
+<p class="hint">reostream only needs the media port.</p>
+<script>
+function netConfirm(f) {
+  if (f.value.value === '0') return confirm('Turn off ' + f.dataset.label + '?');
+  if (f.port.value !== f.dataset.port) return confirm('Move ' + f.dataset.label + ' to port ' + f.port.value + '?');
+  return true;
+}
+</script>
+{{if .NetPort.Err}}<p class="outcome-refused">{{.NetPort.Err}}</p>{{end}}
+{{if .NetPort.Have}}
+{{range .NetPort.Services}}
+<div class="setting">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>{{.Label}}{{template "info" .Help}}</p>
+<form class="control autosave" method="post" action="/cameras/{{$.Camera.Name}}/netport" data-label="{{.Label}}" data-port="{{.Port}}" onsubmit="return netConfirm(this)">
+<input type="hidden" name="service" value="{{.Key}}">
+<input type="hidden" name="value" value="{{if .On}}1{{else}}0{{end}}">
+<button type="button" class="switch" aria-pressed="{{if .On}}true{{else}}false{{end}}" aria-label="{{.Label}}"><span class="knob"></span></button>
+<label class="port-field"><span>port</span><input type="number" name="port" min="1" max="65535" value="{{.Port}}" aria-label="{{.Label}} port"></label>
+</form>
+</div>
+{{end}}
+<div class="setting">
+<p>Media port{{template "info" "How reostream and the Reolink apps reach the camera. Change it in the Reolink app."}}</p>
+<div class="control"><span class="mono">port {{.NetPort.MediaPort}}</span></div>
+</div>
+{{end}}
+</section>
+{{end}}
+
+{{if eq .Cat "ptz"}}
+<section>
+<div class="sec-head"><h2>Auto return</h2><span class="sec-where">on camera</span></div>
+{{if .PTZ.GuardErr}}<p class="outcome-refused">{{.PTZ.GuardErr}}</p>
+{{else}}
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/ptz/guard">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Return to guard position{{template "info" "Goes back to the guard position after it has been left alone."}}</p>
+<div class="control">
+<input type="hidden" name="enable" value="{{if .PTZ.Guard.Enable}}1{{else}}0{{end}}">
+<button type="button" class="switch" data-field="enable" aria-pressed="{{if .PTZ.Guard.Enable}}true{{else}}false{{end}}" aria-label="Return to guard position" data-governs="row-guard-timeout"><span class="knob"></span></button>
+{{if not .PTZ.Guard.Valid}}<span class="hint">No guard position set; set one in the Reolink app.</span>{{end}}
+</div>
+</form>
+<form class="setting autosave" id="row-guard-timeout" method="post" action="/cameras/{{.Camera.Name}}/ptz/guard">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>After</p>
+<div class="control">
+<input type="number" name="timeout" min="10" max="300" step="1" value="{{.PTZ.Guard.Timeout}}" style="width:90px"> <span>seconds</span>
+</div>
+</form>
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/ptz/guardpos" data-nav>
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Guard position{{template "info" "Point the camera where it should rest (Live tab), then save that spot here."}}</p>
+<div class="control">
+<button type="submit" name="op" value="set">Set to where it points now</button>
+<button type="submit" class="quiet" name="op" value="go">Go there</button>
+</div>
+</form>
+{{end}}
+</section>
+<section>
+<div class="sec-head"><h2>Calibrate</h2><span class="sec-where">on camera</span></div>
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/ptz/calibrate" data-nav onsubmit="return confirm('Calibrate? The camera turns through its whole range for a minute or two.')">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Pan and tilt{{template "info" "The camera turns to both ends of each axis to relearn its limits. Use it if positions or presets have drifted."}}</p>
+<div class="control">
+{{if .PTZ.Calibrated}}<span class="hint">{{.PTZ.Calibrated}}</span>{{end}}
+<button type="submit">Calibrate</button>
+</div>
+</form>
+</section>
+{{if .Track.Supported}}
+<section>
+<div class="sec-head"><h2>Auto tracking</h2><span class="sec-where">on camera</span></div>
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/ptz/track">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Follow what moves{{template "info" "The camera turns to follow a person, vehicle or animal it detects, then goes back."}}</p>
+<div class="control">
+<input type="hidden" name="on" value="{{if .Track.On}}1{{else}}0{{end}}">
+<button type="button" class="switch" data-field="on" aria-pressed="{{if .Track.On}}true{{else}}false{{end}}" aria-label="Auto tracking" data-governs="row-track-what"><span class="knob"></span></button>
+</div>
+</form>
+<div id="row-track-what">
+{{range .Track.Kinds}}
+<form class="setting autosave" method="post" action="/cameras/{{$.Camera.Name}}/ptz/track">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Follow {{.Label}}</p>
+<div class="control">
+<input type="hidden" name="{{.Key}}" value="{{if .On}}1{{else}}0{{end}}">
+<button type="button" class="switch" data-field="{{.Key}}" aria-pressed="{{if .On}}true{{else}}false{{end}}" aria-label="Follow {{.Label}}"><span class="knob"></span></button>
+</div>
+</form>
+{{end}}
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/ptz/track">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Go back after it leaves{{template "info" "Seconds after the target is out of sight before the camera returns."}}</p>
+<div class="control"><select name="aiDisappearBackTime">
+{{if not (.Track.HasChoice .Track.DisappearBack)}}<option value="{{.Track.DisappearBack}}" selected>{{.Track.DisappearBack}} s</option>{{end}}
+{{range .Track.BackChoices}}<option value="{{.}}"{{if eq . $.Track.DisappearBack}} selected{{end}}>{{.}} s</option>{{end}}
+</select></div>
+</form>
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/ptz/track">
+<p><span class="tier tier-untested" title="Not yet verified on a camera"></span>Go back after it stops{{template "info" "Seconds after the target stops moving before the camera returns."}}</p>
+<div class="control"><select name="aiStopBackTime">
+{{if not (.Track.HasChoice .Track.StopBack)}}<option value="{{.Track.StopBack}}" selected>{{.Track.StopBack}} s</option>{{end}}
+{{range .Track.BackChoices}}<option value="{{.}}"{{if eq . $.Track.StopBack}} selected{{end}}>{{.}} s</option>{{end}}
+</select></div>
 </form>
 </div>
 </section>
 {{end}}
-
-</div>
-</div>
-
-{{if .Err}}<p class="outcome-refused">{{.Err}}</p>{{end}}
-
-{{/*
-  Everything below is what the camera REPORTS about itself. Nothing here
-  changes anything, so it is closed by default and opens in place. Plain
-  <details>, no script: a reference table that needs JavaScript to be
-  readable is one that disappears the day the script breaks.
-*/}}
-<details class="card reports">
-<summary class="hint">what this camera reports</summary>
-
-{{if .Support}}
-<div class="table-wrap">
-<h3>What it says it is</h3>
-<table>
-<tr><td>Channels</td><td class="mono">{{.Support.Support.ChannelNum}}</td></tr>
-<tr><td>PTZ</td><td class="mono">{{if .Support.HasPTZ}}{{.Support.Support.PTZMode}}{{else}}none{{end}}</td></tr>
-<tr><td>Talk</td><td class="mono">{{if .Support.CanTalk}}yes{{else}}no{{end}}</td></tr>
-<tr><td>Extern stream</td><td class="mono">{{if .Support.HasExternStream}}yes{{else}}no{{end}}</td></tr>
-<tr><td>WiFi</td><td class="mono">{{if .Support.Support.WiFi}}yes{{else}}no{{end}}</td></tr>
-<tr><td>ONVIF</td><td class="mono">{{if .Support.Support.ONVIF}}yes{{else}}no{{end}}</td></tr>
-</table>
-</div>
 {{end}}
 
-{{if .Abilities}}
-<div class="table-wrap">
-<h3>What this login may do</h3>
-<table>
-<tr><th>Module</th><th>Name</th><th>Access</th></tr>
-{{range .Abilities}}
-<tr><td class="mono">{{.Module}}</td><td class="mono">{{.Name}}</td><td class="mono">{{if .Writable}}read/write{{else}}read{{end}}</td></tr>
-{{end}}
-</table>
+{{if eq .Cat "clips"}}
+<section>
+<div class="sec-head"><h2>Auto-save motion clips</h2></div>
+<p class="hint">On: every motion clip this camera records is saved to reostream by itself, through the camera's own FTP upload (reostream sets it all up). Off: clips stay on the camera's card.</p>
+{{with .Clips}}
+<div class="setting"><p>Status</p><div class="control">{{if and $.Clips.Uploading $.Clips.PointedAt}}<span class="statebadge state-streaming"><span class="dot" style="background:currentColor"></span>on</span>{{else if $.Clips.Uploading}}<span class="statebadge state-novideo"><span class="dot" style="background:currentColor"></span>uploading somewhere else</span>{{else}}<span class="statebadge state-idle"><span class="dot" style="background:currentColor"></span>off</span>{{end}}</div></div>
+<div class="setting"><p>Saved here</p><div class="control"><span class="mono">{{.Count}} clip{{if ne .Count 1}}s{{end}}{{if not .Last.IsZero}} &middot; last {{.Last.Format "Jan 2 15:04"}}{{end}}</span></div></div>
+{{if .CamErr}}<p class="outcome-refused">{{.CamErr}}</p>{{end}}
+{{if .LowDisk}}<p class="outcome-refused">{{.LowDisk}}</p>{{end}}
+<form method="post" action="/cameras/{{$.Camera.Name}}/clips" class="clips-form" data-nav>
+<div class="setting"><p>Stream{{template "info" "Main is full resolution, often H.265. Sub is smaller and plays in every browser; not yet tried on a camera."}}</p>
+<div class="control"><div class="seg" role="radiogroup">
+<label class="seg-radio"><input type="radio" name="stream" value="main" checked><span>Main</span></label>
+<label class="seg-radio"><input type="radio" name="stream" value="sub"><span>Sub</span></label>
+</div></div></div>
+<div class="setting"><p>Upload to{{template "info" "Worked out from this camera's network: the address of reostream the camera can reach. Type one only if that is wrong."}}</p><div class="control"><input type="text" name="host" value="" placeholder="{{if .HostGuess}}{{.HostGuess}} (automatic){{else}}e.g. 192.168.1.10{{end}}"{{if not .HostGuess}} required{{end}} style="width:13rem"> <span class="mono dim">port {{if .Listen}}{{.Listen}}{{else}}2121{{end}}</span></div></div>
+<div class="setting"><p>Keep for{{template "info" "How long saved clips are kept, for every camera, before the oldest are deleted. 0 keeps them forever (watch the disk)."}}</p><div class="control"><input type="number" name="keep_days" min="0" max="3650" value="{{.KeepDays}}" style="width:80px"> <span>{{if eq .KeepDays 0}}days (forever){{else}}days{{end}}</span></div></div>
+<div class="buttonrow">
+{{if and $.Clips.Uploading $.Clips.PointedAt}}<button type="submit" name="stop" value="1" formnovalidate>Turn off</button>
+<button type="submit" class="quiet">Apply again</button>{{else}}<button type="submit">Turn on</button>
+{{if $.Clips.Uploading}}<button type="submit" class="quiet" name="stop" value="1" formnovalidate>Stop the other upload</button>{{end}}{{end}}
 </div>
+</form>
+{{if .On}}<p class="hint mono">ftp://{{if .Host}}{{.Host}}{{else}}this host{{end}}:{{.Listen}} &rarr; {{.Dir}}</p>{{end}}
+{{end}}
+</section>
 {{end}}
 
-{{if .Probes}}
-<div class="table-wrap">
-<h3>What it answers</h3>
-<p class="hint">A message this model does not implement answers 405 rather than dropping the connection, which is what makes asking about every known message safe.</p>
-<table>
-<tr><th>Supported</th><th>Wants parameters</th><th>Absent</th><th>No answer</th></tr>
-<tr><td class="mono">{{.SupportedCount}}</td><td class="mono">{{.WantsParamsCount}}</td><td class="mono">{{.AbsentCount}}</td><td class="mono">{{.HungUpCount}}</td></tr>
-</table>
-</div>
-{{end}}
-</details>
-
-{{if .Probes}}
-<p class="hint">Beyond the curated settings: <a href="/cameras/{{.Camera.Name}}/advanced">every document this camera has</a>.</p>
+{{if eq .Cat "remove"}}
+<section>
+<div class="sec-head"><h2>Remove {{.Camera.Name}}</h2></div>
+<p class="hint">Nothing changes on the camera.</p>
+<form method="post" action="/cameras/{{.Camera.Name}}/remove" data-nav
+  onsubmit="return confirm('Remove {{.Camera.Name}} from reostream?')">
+<button type="submit" class="danger-btn">Remove {{.Camera.Name}}</button>
+</form>
+</section>
 {{end}}
 
+{{template "camsettings-close"}}
 <script src="/assets/mpegts.js"></script>
 <script src="/assets/snapshot.js"></script>
 <script src="/assets/settings.js"></script>
+<script src="/assets/encoding.js"></script>
+<script src="/assets/live.js"></script>
+{{end}}
 {{end}}
 
-{{/*
-  One curated group. dict is the helper described in NOTES.md; G is the
-  group, P is the page, because a template called from inside range needs
-  both and Go templates have one dot.
-*/}}
 {{define "settingsgroup"}}
-{{$group := .G}}{{$ := .P}}
-<section>
-<div style="display:flex;align-items:baseline;gap:8px">
-<h2>{{$group.Title}}</h2>
-<button type="button" class="linkish section-reset" style="margin-left:auto" hidden>&#8634; reset section</button>
+{{$group := .G}}{{$prev := .Preview}}{{$ := .P}}
+<section{{if $prev}} class="has-preview"{{end}}>
+<div class="sec-head">
+<h2>{{$group.Title}}</h2><span class="sec-where">on camera</span>
+<span class="sec-actions">
+<button type="button" class="linkish section-reset" hidden>&#8634; Reset section</button>
+{{if gt (len $.Head.Cameras) 1}}<button type="button" class="linkish copy-open" aria-expanded="false">&#10697; Copy to other cameras</button>{{end}}
+</span>
 </div>
+{{if gt (len $.Head.Cameras) 1}}
+<form class="copy-panel" method="post" action="/cameras/{{$.Camera.Name}}/copy" data-report hidden>
+<input type="hidden" name="group" value="{{$group.Title}}">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<p class="hint">Copy {{$group.Title}} to:</p>
+<div class="copy-cams">
+<label class="copy-all"><input type="checkbox" data-all> All</label>
+{{range $.Head.Cameras}}{{if ne .Name $.Camera.Name}}<label><input type="checkbox" name="to" value="{{.Name}}"> {{.Name}}</label>{{end}}{{end}}
+</div>
+<button type="submit">Copy</button>
+</form>
+{{end}}
 {{if $group.Blurb}}<p class="hint">{{$group.Blurb}}</p>{{end}}
 {{if $.SettingsErr}}<p class="outcome-refused">{{$.SettingsErr}}</p>{{end}}
+<div class="sec-split">
+<div class="sec-fields">
 
 {{range $group.Fields}}
 {{if eq .Kind "warning"}}
@@ -206,15 +525,16 @@ wrong part of the picture.</p>
      document does not carry, says so where the control would be: never a
      blank editable input that only fails once someone submits it. */}}
 <div class="setting">
-<p>{{.Label}}</p>
+<p><span class="tier tier-{{$group.Tier}}" title="{{$group.TierLabel}}"></span>{{.Label}}</p>
 <p class="warning">not available: {{index $.Unavailable .XPath}}</p>
 </div>
 {{else}}
 {{$current := index $.Values .XPath}}{{$field := .}}
 <div class="setting" id="row-{{.Slug}}">
-<p>{{.Label}}</p>
-<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/settings"{{if $group.ConfirmReason}} onsubmit="return confirm('{{$group.ConfirmReason}}')"{{end}}>
+<p><span class="tier tier-{{$group.Tier}}" title="{{$group.TierLabel}}"></span>{{.Label}}{{with .Help}}{{template "info" .}}{{end}}{{if $.Reset .}}<span class="changed" title="Changed from factory"></span>{{end}}</p>
+<form class="control autosave" method="post" action="/cameras/{{$.Camera.Name}}/settings"{{if $group.ConfirmReason}} onsubmit="return confirm('{{$group.ConfirmReason}}')"{{end}}>
 <input type="hidden" name="block" value="{{index $.ResolvedBlock $group.Title}}">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
 {{/* FormXPath, not XPath: a control that changes two elements together
      (an overlay's corner) names both here, comma separated, and the
      handler applies them inside one read-modify-write. */}}
@@ -236,11 +556,11 @@ wrong part of the picture.</p>
      the table has no name for keeps it: no stop is lit, and the note says
      what the camera holds. */}}
 {{$pos := $.Position .}}
-<div class="segmented" role="radiogroup" aria-label="{{.Label}}">
-{{range $pos.Options}}<label class="corner-{{.Value}}"><input type="radio" name="value" value="{{.Value}}"{{if .Selected}} checked{{end}}><span>{{.Label}}</span></label>{{end}}
+<div class="segmented corners" role="radiogroup" aria-label="{{.Label}}">
+{{range $pos.Options}}<label class="corner-{{.Value}}{{if .Taken}} taken{{end}}"{{if .Taken}} title="{{.Taken}} is there"{{end}}><input type="radio" name="value" value="{{.Value}}"{{if .Selected}} checked{{end}}{{if .Taken}} disabled{{end}}><span>{{.Label}}</span></label>{{end}}
 </div>
 <noscript><button type="submit">set</button></noscript>
-{{if $pos.Unknown}}<p class="hint">This camera holds {{$pos.Unknown}}, a position this project has never seen a camera use. Picking a corner replaces it.</p>{{end}}
+{{if $pos.Unknown}}<p class="hint">Currently {{$pos.Unknown}}, an unnamed position.</p>{{end}}
 {{if $pos.NotRead}}<p class="hint">Not read from the camera.</p>{{end}}
 
 {{else if eq .Kind "choice"}}
@@ -262,7 +582,6 @@ wrong part of the picture.</p>
   min="{{$.SliderMin $current}}" max="{{$.SliderMax $current}}" step="1" value="{{$current}}">
 <input type="number" class="slider-box" name="value" value="{{$current}}">
 </span>
-<button type="submit">set</button>
 
 {{else if eq .Kind "reading"}}
 {{/* Read only on purpose: see the Go side for why this field is not a
@@ -270,8 +589,7 @@ wrong part of the picture.</p>
 <span class="exact">{{$current}}</span>
 
 {{else}}
-<input type="text" name="value" value="{{$current}}">
-<button type="submit">set</button>
+<input type="text" name="value" value="{{$current}}" class="autosave-field">
 {{end}}
 {{/* The camera's own factory value, offered only when it reported one
      and this field does not already hold it. settings.js fills the
@@ -281,7 +599,28 @@ wrong part of the picture.</p>
 </div>
 {{end}}
 {{end}}
+{{if and (eq $group.Title "Lights") $.HasFloodlight}}
+{{if $.FloodlightErr}}<p class="outcome-refused">{{$.FloodlightErr}}</p>{{end}}
+<div class="setting">
+<p><span class="tier tier-{{$group.Tier}}" title="{{$group.TierLabel}}"></span>Floodlight{{template "info" "Motion: on when something moves. Schedule: on at the hours set in the Reolink app."}}</p>
+<form class="control autosave" method="post" action="/cameras/{{$.Camera.Name}}/floodlight" onsubmit="return confirm('{{$.FloodlightConfirm}}')">
+<div class="segmented" role="radiogroup" aria-label="Floodlight">
+{{$currentFloodlight := $.FloodlightCurrent}}
+{{range $.FloodlightOptions}}<label><input type="radio" name="option" value="{{.Value}}"{{if eq .Value $currentFloodlight}} checked{{end}}><span>{{.Value}}</span></label>{{end}}
+</div>
+</form>
+</div>
+{{end}}
+</div>
+{{if $prev}}{{with $.Group.Tile}}{{if .Playable}}
+<aside class="sec-preview">
+<p class="sec-preview-head"><span class="live-dot"></span>LIVE <span class="hint">sub stream</span></p>
+<div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div>
+</aside>
+{{end}}{{end}}{{end}}
+</div>
 </section>
+
 <script>
 window.addEventListener("load", function () {
   if (window.reostreamSnapshots) reostreamSnapshots(document.querySelectorAll(".cam-video[data-src]"));

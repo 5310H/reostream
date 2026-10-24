@@ -1,0 +1,68 @@
+{{/*
+  view.html: the dewarped view of a fisheye camera.
+
+  The camera sends a circle and nothing else -- it has no idea this page
+  exists. Everything here is drawn in the browser from that circle, which
+  is also how the vendor's own clients do it. See assets/fisheye.js.
+*/}}
+{{define "body"}}
+<div class="pagehead">
+<div>
+<h1>{{.Camera}}</h1>
+<p class="subtitle">Dewarped in your browser. The camera keeps sending its raw circle.</p>
+</div>
+<div class="actions">
+<a href="/cameras/{{.Camera}}"><button type="button">Camera settings</button></a>
+</div>
+</div>
+
+{{if .Playable}}
+<div class="dewarp-controls">
+<label>Layout
+<select id="dewarp-layout">
+<option value="1">One pane</option>
+<option value="2">Two panes</option>
+<option value="4">Four panes</option>
+</select>
+</label>
+<label>Projection
+<select id="dewarp-projection">
+<option value="0">Rectilinear</option>
+<option value="1">Stereographic</option>
+<option value="2">Panoramic band</option>
+</select>
+</label>
+<label>Mounted
+<select id="dewarp-mount">
+<option value="ceiling">Ceiling</option>
+<option value="wall">Wall or desktop</option>
+</select>
+</label>
+<button type="button" id="dewarp-reset">Recenter panes</button>
+</div>
+
+<div id="dewarp" data-url="{{.URL}}">
+<canvas id="dewarp-canvas"></canvas>
+<video id="dewarp-video" playsinline muted hidden></video>
+</div>
+<p class="hint" id="dewarp-note">Drag a pane to look around. Scroll to zoom. Rectilinear keeps straight lines straight; stereographic bends them to fit much more of the room in without smearing the edges; the panoramic band unrolls what the lens saw into a strip, and its panes split the sweep between them rather than each showing all of it &mdash; two panes is the vendor&rsquo;s dual panoramic. Set how the camera is mounted first: it decides which way up the picture goes and which way the band unrolls.</p>
+
+<details class="dewarp-cal">
+<summary>Lens calibration</summary>
+<p class="hint">Only needed if the picture smears at the rim. The defaults assume the circle is centered and fills the frame.</p>
+<label>Center X <input type="range" id="cal-cx" min="0.40" max="0.60" step="0.001" value="0.5"> <output id="cal-cx-out"></output></label>
+<label>Center Y <input type="range" id="cal-cy" min="0.40" max="0.60" step="0.001" value="0.5"> <output id="cal-cy-out"></output></label>
+<label>Radius <input type="range" id="cal-radius" min="0.35" max="0.60" step="0.001" value="0.5"> <output id="cal-radius-out"></output></label>
+<label>Lens field of view <input type="range" id="cal-fov" min="150" max="220" step="1" value="180"> <output id="cal-fov-out"></output></label>
+</details>
+
+<script src="/assets/mpegts.js"></script>
+<script src="/assets/fisheye.js"></script>
+<script src="/assets/fisheyeview.js"></script>
+{{else}}
+<div class="alert">
+<span>This camera has no stream a browser can play, so there is nothing to dewarp.</span>
+<a href="/cameras/{{.Camera}}">Open {{.Camera}} &rarr;</a>
+</div>
+{{end}}
+{{end}}

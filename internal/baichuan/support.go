@@ -151,7 +151,13 @@ func (s Support) HasFishEye(id int) bool {
 }
 
 // HasStitch reports whether channel id has two lenses whose seam GetStitch
-// and SetStitch adjust. In practice binoCfg and fishEye are never both set.
+// and SetStitch adjust.
+//
+// Measured on this fleet, binoCfg is exactly the inverse of fishEye: 1 on
+// the pano and 0 on the fisheye, against 0 and 3 for fishEye. That is the
+// physical fact behind it -- one sensor behind one lens has no seam, and
+// two lenses have nothing to dewarp -- so the two controls are never both
+// offered, and neither is ever offered on the six ordinary cameras.
 func (s Support) HasStitch(id int) bool {
 	ch, ok := s.Channel(id)
 	return ok && ch.BinoCfg != 0

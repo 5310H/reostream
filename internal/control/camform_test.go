@@ -1,9 +1,15 @@
 package control
 
 import (
+	"context"
+	"html"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -119,6 +125,70 @@ func TestUpsertAppendsToAnEmptyFile(t *testing.T) {
 	}
 }
 
+// Removing a camera takes its block and the blank lines around it, and
+// leaves everything else -- including other cameras and the file's own
+// comments and settings -- exactly as it was.
+func TestRemoveCameraBlockTakesOnlyTheNamedBlock(t *testing.T) {
+	text := `# header comment
+
+listen = "0.0.0.0:8560"
+
+[[camera]]
+name = "one"
+address = "192.0.2.50"
+
+[[camera]]
+name = "two"
+address = "192.0.2.51"
+`
+	got, ok := removeCameraBlock(text, "one")
+	if !ok {
+		t.Fatal("removeCameraBlock did not find camera one")
+	}
+	for _, want := range []string{"# header comment", `listen = "0.0.0.0:8560"`, `name = "two"`, `address = "192.0.2.51"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("removing camera one destroyed %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, `name = "one"`) || strings.Contains(got, `192.0.2.50`) {
+		t.Errorf("camera one is still present:\n%s", got)
+	}
+	if n := strings.Count(got, "[[camera]]"); n != 1 {
+		t.Errorf("%d camera blocks, want 1:\n%s", n, got)
+	}
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("removal left a double gap:\n%s", got)
+	}
+}
+
+// Removing a camera that is not there changes nothing and says so, rather
+// than mangling the file.
+func TestRemoveCameraBlockLeavesAnUnknownNameAlone(t *testing.T) {
+	text := "[[camera]]\nname = \"one\"\naddress = \"192.0.2.50\"\n"
+	got, ok := removeCameraBlock(text, "nope")
+	if ok {
+		t.Error("removeCameraBlock claimed to remove a camera that is not in the file")
+	}
+	if got != text {
+		t.Errorf("the file was changed despite no match:\n%s", got)
+	}
+}
+
+// Removing the only camera leaves no stray camera block behind.
+func TestRemoveCameraBlockCanEmptyTheCameras(t *testing.T) {
+	text := "listen = \"0.0.0.0:8560\"\n\n[[camera]]\nname = \"one\"\naddress = \"192.0.2.50\"\n"
+	got, ok := removeCameraBlock(text, "one")
+	if !ok {
+		t.Fatal("removeCameraBlock did not find camera one")
+	}
+	if strings.Contains(got, "[[camera]]") {
+		t.Errorf("a camera block survived removing the only camera:\n%s", got)
+	}
+	if !strings.Contains(got, `listen = "0.0.0.0:8560"`) {
+		t.Errorf("removing the camera took the rest of the file with it:\n%s", got)
+	}
+}
+
 func TestFormAddsANewCamera(t *testing.T) {
 	cfg := &config.Config{}
 	form := url.Values{
@@ -193,7 +263,7 @@ func TestFormAddServesRTSPWhenItIsOn(t *testing.T) {
 // keep its channel, or the next save points it at channel 0, another camera.
 func TestFormEditKeepsAHubCamerasChannel(t *testing.T) {
 	cfg := &config.Config{Cameras: []config.Camera{
-		{Name: "yard", Address: "1.1.1.1", Channel: 2, Password: "x", Streams: []string{"main"}},
+		{Name: "yard", Address: "1.1.1.1", Channel: 2, UID: "95270000TESTUID1", Password: "x", Streams: []string{"main"}},
 	}}
 	form := url.Values{
 		"name":     {"yard"},
@@ -213,6 +283,9 @@ func TestFormEditKeepsAHubCamerasChannel(t *testing.T) {
 	if strings.Contains(cameraBlockText(config.Camera{Name: "a"}), "channel") {
 		t.Fatal("a standalone camera's block gained a channel line")
 	}
+	if cfg.Cameras[0].UID != "95270000TESTUID1" || !strings.Contains(cameraBlockText(cfg.Cameras[0]), "uid = \"95270000TESTUID1\"\n") {
+		t.Fatal("an edit drops the uid")
+	}
 }
 
 // Camera settings address channel 0 on every path, which behind a hub is a
@@ -231,5 +304,49 @@ func TestSettingsRefuseAHubCamera(t *testing.T) {
 	}
 	if _, err := s.byName("porch"); err != nil {
 		t.Fatalf("byName(standalone camera) = %v", err)
+	}
+}
+
+// The round trip a browser makes: render the camera list, submit a row's
+// password box exactly as the page filled it in, and keep the password.
+// Posting the sentinel straight to applyCameraForm hid that the page
+// never sent it intact (html/template turned its NUL into U+FFFD).
+func TestCameraListRoundTripKeepsThePassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	os.WriteFile(path, []byte("listen = \"0.0.0.0:8560\"\n\n[control]\nlisten = \"0.0.0.0:8562\"\nallow_no_password = true\n\n[[camera]]\nname = \"gate\"\naddress = \"192.0.2.10\"\nusername = \"admin\"\npassword = \"s3cret-pass\"\nstreams = [\"main\"]\n"), 0o600)
+	s := newTestServer(t, Options{AllowNoPassword: true, ConfigPath: path})
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/cameras", nil))
+	m := regexp.MustCompile(`<input type="password" name="password" value="([^"]*)"`).FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		t.Fatalf("no password box on the camera list (status %d): %.300s", rec.Code, rec.Body.String())
+	}
+	cfg, err := config.LoadRaw(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"name": {"gate"}, "address": {"192.0.2.10"}, "username": {"admin"}, "password": {html.UnescapeString(m[1])}, "streams": {"main", "sub"}}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatalf("saving the row as the page sent it: %v", err)
+	}
+	if got := cfg.Cameras[0].Password; got != "s3cret-pass" {
+		t.Fatalf("password = %q, want it kept", got)
+	}
+}
+
+// The camera list offers only streams a camera has: zoom only where the
+// camera serves one, nothing but main and sub on a battery camera, and a
+// stream already set is always there to be turned off.
+func TestCameraListOffersOnlyStreamsTheCameraHas(t *testing.T) {
+	s := newTestServer(t, Options{AllowNoPassword: true, ConfigPath: writeTestConfig(t, "gate")})
+	ctx := context.Background()
+	if got := s.availableStreams(ctx, config.Camera{Name: "porch", UID: "95270000TESTUID1"}); strings.Join(got, ",") != "main,sub" {
+		t.Errorf("battery camera offered %v", got)
+	}
+	if got := s.availableStreams(ctx, config.Camera{Name: "gate", Streams: []string{"main", "zoom"}}); !slices.Contains(got, "zoom") {
+		t.Errorf("a configured zoom stream is not offered to turn off: %v", got)
+	}
+	if got := s.availableStreams(ctx, config.Camera{Name: "gate", Streams: []string{"main"}}); slices.Contains(got, "zoom") {
+		t.Errorf("zoom offered on a camera that does not serve it: %v", got)
 	}
 }

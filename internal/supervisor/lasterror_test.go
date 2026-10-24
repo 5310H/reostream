@@ -8,7 +8,15 @@ import (
 	"github.com/VoltTech21/reostream/internal/config"
 )
 
-// LastError is kept after recovery, so it needs a timestamp.
+// An error that is kept forever has to say when it happened.
+//
+// LastError is never cleared, which is deliberate: a stream that failed and
+// recovered is worth knowing about. The cost is that the sentence reads in
+// the present tense at any age. On 2026-10-16 a fisheye substream reported
+// "camera is answering but not sending media (held session)" from a single
+// restart hours earlier while it was streaming at 9.8 fps with a frame 0.1s
+// old, and that stale sentence was read off the status page and reported as
+// a dead feed. The age is what tells the two apart.
 func TestALastErrorCarriesWhenItHappened(t *testing.T) {
 	s := New([]config.Camera{
 		{Name: "fisheye", Address: "192.0.2.1", Streams: []string{"sub"}},
@@ -32,7 +40,9 @@ func TestALastErrorCarriesWhenItHappened(t *testing.T) {
 			got.LastErrorAt, before, after)
 	}
 
-	// Recovery must not reset the error's time.
+	// Recovering does not erase the error, and must not reset its age
+	// either: an hour-old failure stays an hour old once the stream is
+	// running again, which is the whole point.
 	was := got.LastErrorAt
 	s.setRunning(s.entries["fisheye/sub"], true)
 	if again := s.Stats()[0]; !again.LastErrorAt.Equal(was) {

@@ -1,0 +1,27 @@
+{{/*
+  wall.html: every camera in one dense grid, the redesign's Wall. It reuses
+  the dashboard's statusCard, so a tile is in the same state the Fleet shows.
+  Groups, per-tile crop and dewarp are the redesign's later Wall work; this
+  is the plain grid of live tiles it starts from.
+*/}}
+{{define "body"}}
+<div class="pagehead">
+<div>
+<h1>Wall</h1>
+<p class="subtitle">Every camera at once. Press a tile for live.</p>
+</div>
+</div>
+
+<div class="wall-grid">
+{{range .Cards}}
+<div class="wall-tile">
+{{template "cameravideo" .}}
+<a class="wall-label" href="/cameras/{{.Camera}}"><span class="dot state-{{.State}}"></span>{{.Camera}}</a>
+</div>
+{{end}}
+</div>
+
+<script src="/assets/mpegts.js"></script>
+<script src="/assets/snapshot.js"></script>
+<script src="/assets/dashboard.js"></script>
+{{end}}

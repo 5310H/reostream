@@ -90,8 +90,10 @@ func TestDashboardIsOneCardPerCamera(t *testing.T) {
 	if !strings.Contains(page, "192.0.2.29") {
 		t.Errorf("the card does not show the camera's address\n%s", page)
 	}
-	// The host the page was reached on, not the config's wildcard listen
+	// The stream URLs are the camera's Live tab Copy URL list, built from
+	// the host the page was reached on, not the config's wildcard listen
 	// address: a URL built from 0.0.0.0 works from nowhere.
+	page = getBody(t, ts, "/cameras/lounge")
 	host := hostOf(t, ts.URL)
 	for _, want := range []string{
 		"http://" + host + ":8560/lounge.ts",
@@ -99,7 +101,7 @@ func TestDashboardIsOneCardPerCamera(t *testing.T) {
 		"http://" + host + ":8560/lounge_extern.ts",
 	} {
 		if !strings.Contains(page, want) {
-			t.Errorf("the card does not show the stream URL %q\n%s", want, page)
+			t.Errorf("the Copy URL list does not offer %q\n%s", want, page)
 		}
 	}
 }
@@ -198,25 +200,29 @@ func TestOSDReadFailureDoesNotBreakTheRow(t *testing.T) {
 			t.Fatalf("the status page lost %q when the camera could not be read\n%s", want, page)
 		}
 	}
-	// And the switches must be rendered unreadable rather than guessed at:
-	// disabled until the fetch answers.
-	if !strings.Contains(page, `type="checkbox" disabled`) {
-		t.Error("the overlay toggles do not start disabled, so the page is drawing a state it has not read")
+	// The overlay switches left the Fleet cards in the redesign (6ce0fb7);
+	// they live on the camera's Name and timestamp settings now, so there is
+	// no unread switch here to check.
+	if strings.Contains(page, `type="checkbox"`) && !strings.Contains(page, `type="checkbox" disabled`) {
+		t.Error("an overlay toggle is drawn enabled before its state was read")
 	}
 }
 
-// TestDashboardAutoplaysOnlyTheCheapStream replaces an earlier guard that
-// forbade autoplay outright.
+// TestDashboardHoldsOneDecoderAtATime is the third version of this guard,
+// and the constraint has survived all three: the page must never hold a
+// decoder per camera.
 //
-// That guard was written for a live bug: the page created and loaded a
-// player for every tile the instant it opened, which was eight
-// simultaneous decodes on an eight camera fleet. What made that expensive
-// was the stream, not the autoplay. A tile plays the sub stream, 640x360
-// at about a quarter of a megabit, where main is 4K at six, and eight
-// tiles waiting behind a play button are eight cameras nobody is watching.
+// First it was "never autoplay", written after the page built a player for
+// every tile at load, which was eight simultaneous decodes. Then tiles
+// played their sub stream, which was affordable in bandwidth and still
+// eight decode pipelines, and with live latency chasing on, every stopped
+// one left a timer polling a SourceBuffer that no longer existed: 7,597
+// exceptions on a single page load.
 //
-// So the cost is still bounded, by these three rules.
-func TestDashboardAutoplaysOnlyTheCheapStream(t *testing.T) {
+// Now one player exists at a time and walks the cameras, taking a frame
+// from each. A fleet page answers "is this working and what does it see",
+// and a picture a few seconds old answers it.
+func TestDashboardHoldsOneDecoderAtATime(t *testing.T) {
 	h := hub.New(4)
 	h.SetKeyframe("H264", nil)
 	main := hub.New(4)
@@ -239,16 +245,13 @@ func TestDashboardAutoplaysOnlyTheCheapStream(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	page := string(body)
 
-	// The tile that plays by itself must be the sub stream. A page that
-	// autoplayed main would be the original bug wearing a new name.
+	// The tile is pointed at the sub stream. Anything that walks the
+	// cameras must walk the cheap one.
 	if !strings.Contains(page, `data-src="/stream/gate_sub.ts"`) {
-		t.Errorf("the tile does not play the sub stream:\n%s", page)
+		t.Errorf("the tile is not pointed at the sub stream:\n%s", page)
 	}
 	if strings.Contains(page, `data-src="/stream/gate.ts"`) {
-		t.Error("the tile plays the main stream, which is what made eight at once expensive")
-	}
-	if !strings.Contains(page, "data-autoplay") {
-		t.Error("no tile is marked to play by itself")
+		t.Error("the tile is pointed at the main stream, which is what made eight at once expensive")
 	}
 
 	if !strings.Contains(page, `<script src="/assets/dashboard.js"></script>`) {
@@ -262,16 +265,20 @@ func TestDashboardAutoplaysOnlyTheCheapStream(t *testing.T) {
 	script, _ := io.ReadAll(js.Body)
 	code := string(script)
 
-	// Stopping a tile must destroy its player. Pausing the element is not
-	// enough: mpegts.js keeps pulling the stream over XHR while paused,
-	// which leaves the daemon serving a tab nobody is watching.
-	if !strings.Contains(code, "player.destroy()") {
-		t.Error("stopping a tile must destroy the player, not just pause the element")
+	// A stopped player must be destroyed. Pausing is not enough:
+	// mpegts.js keeps pulling over XHR while paused, which leaves the
+	// daemon streaming to a tab nobody is watching.
+	if !strings.Contains(code, "destroy()") {
+		t.Error("a stopped player is not destroyed, only paused")
 	}
-	// One stepped-up tile at a time: pressing a tile stops whatever was
-	// stepped up before it.
-	if !strings.Contains(code, "stopActive();") {
-		t.Error("pressing a tile does not stop the previously stepped-up one")
+	// Starting a live tile must stop whatever was live before it.
+	if !strings.Contains(code, "stopLive();") {
+		t.Error("starting a live tile does not stop the previous one")
+	}
+	// Latency chasing leaves a timer on a destroyed SourceBuffer. It must
+	// not come back without the teardown that would make it safe.
+	if strings.Contains(code, "liveBufferLatencyChasing") {
+		t.Error("live latency chasing is back; it leaves a timer polling a destroyed SourceBuffer")
 	}
 }
 

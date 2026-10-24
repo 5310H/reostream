@@ -22,8 +22,16 @@ func buildPrefixedFrame(magic []byte, hdrLen int, codec string, stated uint32, m
 	return append(b, append(meta, picture...)...)
 }
 
-// Metadata containing what looks like an SPS (00 00 00 01 27 64) fools the
-// search, but not the declared prefix length. Seen on a real fisheye.
+// The header declares where the picture starts, so metadata that imitates a
+// frame header no longer costs a picture.
+//
+// This is the failure the declared length exists to end. The metadata here
+// contains 00 00 00 01 27 64: a start code, then an SPS header with a
+// profile_idc the spec defines, which is everything the search checks for.
+// A capture from the live fisheye carried exactly this shape. The search
+// stops there, so the metadata is published as the start of the picture and
+// the same number of bytes is cut off its tail -- ffmpeg then reports a
+// non-existing PPS, and the recorder discards the segment that began there.
 func TestTheStatedPrefixBeatsASearchThatMetadataFools(t *testing.T) {
 	meta := append([]byte{0x11, 0x22, 0x33, 0x44},
 		[]byte{0x00, 0x00, 0x00, 0x01, 0x27, 0x64, 0xaa, 0xbb}...)

@@ -22,7 +22,7 @@
 <p class="subtitle">{{.HealthyCount}} of {{len .Cards}} cameras are healthy.</p>
 </div>
 <div class="actions">
-<a href="/setup"><button type="button">Add a camera</button></a>
+<a class="add-cam" href="/setup">+ Add camera</a>
 </div>
 </div>
 
@@ -36,24 +36,49 @@
 </div>
 {{end}}
 
-<div class="fleet">
-{{$toggles := .Toggles}}
+{{if .Cards}}
+<div class="fleet-controls">
+<span class="fc-label">View</span>
+<div class="seg fleet-view" role="group" aria-label="Fleet layout">
+<button type="button" data-view="cards">Cards</button>
+<button type="button" data-view="list">List</button>
+</div>
+<span class="fc-label fc-show">Show</span>
+<div class="fleet-show" role="group" aria-label="What to show on each camera">
+<button type="button" data-show="name">Name</button>
+<button type="button" data-show="address">Address</button>
+<button type="button" data-show="stats">Stats</button>
+</div>
+</div>
+{{end}}
+
+<div class="fleet view-cards" id="fleet">
 {{range .Cards}}
 {{$camera := .Camera}}
+{{/* One Fleet card, laid out to match the redesign's Cards view: the tile
+     with a state badge in its corner and a Live affordance, then the name,
+     address, per-stream stats, and a Settings button. The tile-name is the
+     overlay the compact Grid view shows instead of the card body. */}}
 <div class="card camcard" data-camera="{{$camera}}">
+<div class="camcard-tile">
 {{template "cameravideo" .}}
+<span class="tile-state state-{{.State}}"><span class="d"></span>{{stateLabel .State}}</span>
+{{if and .Tile.Battery (ge .Tile.Level 0)}}<span class="tile-battery{{if lt .Tile.Level 20}} low{{end}}" title="Battery">{{.Tile.Level}}%</span>{{end}}
+<a class="tile-name" href="/cameras/{{$camera}}"><span class="dot state-{{.State}}"></span>{{$camera}}</a>
+</div>
 <div class="camcard-body">
 
 <div class="camcard-head">
 <a class="cam-name" href="/cameras/{{$camera}}">{{$camera}}</a>
-<span class="pill state-{{.State}}">{{.State}}</span>
-{{if .Address}}<a class="exact camaddr" href="http://{{.Address}}" target="_blank" rel="noopener noreferrer" title="open {{.Address}} in a new tab">{{.Address}}</a>{{end}}
+{{if .Address}}<a class="exact camaddr" href="http://{{.Address}}" target="_blank" rel="noopener noreferrer" title="Open the camera's own page">{{.Address}}&nbsp;&#8599;</a>{{end}}
+<a class="camcard-gear" href="/cameras/{{$camera}}/settings/image" aria-label="{{$camera}} settings" title="Settings"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
 </div>
 
 {{if not .Streams}}
-<p><span class="pill state-unknown">no status yet</span></p>
+<p class="hint">No status yet.</p>
 {{end}}
 
+{{if .Streams}}
 <div class="streams">
 {{range .Streams}}
 <div class="streamline">
@@ -61,50 +86,75 @@
 {{if .Codec}}<span class="dim">{{.Codec}}</span>{{end}}
 <span>{{printf "%.1f" .FPS}} fps</span>
 <span>{{.MbpsBitrate}} Mb</span>
-{{/* Clients and restarts used to sit here as "0c 0r". They read as a
-     fault code to anyone who did not already know what they were, and fps
-     and Mb already answer the question the line exists for. The restart
-     count is still worth seeing when something went wrong, so it survives
-     only when there is an error to attach it to. */}}
 {{if .LastError}}<span title="last error: {{.LastError}}">{{.Restarts}} restarts &#9432;</span>{{end}}
 </div>
-{{if .URL}}
-<div class="streamurl">
-<code>{{.URL}}</code>
-<button type="button" class="linkish copy-btn" data-copy="{{.URL}}">copy</button>
-</div>
-{{end}}
 {{end}}
 </div>
+{{end}}
 
-<div class="camcard-tools">
-{{range $toggles}}
-{{/* block is left empty until the OSD read says which block this camera
-     answered on, and the switch stays disabled until then: a toggle that
-     posted a guessed block name would be a write this page cannot stand
-     behind. */}}
-<form class="osd-toggle" method="post" action="/cameras/{{$camera}}/settings" data-xpath="{{.XPath}}">
-<input type="hidden" name="return" value="/">
-<input type="hidden" name="block" value="">
-<input type="hidden" name="xpath" value="{{.XPath}}">
-<input type="hidden" name="value" value="">
-<label title="reading this camera"><input type="checkbox" disabled> {{.Label}}</label>
-</form>
-{{end}}
-</div>
 
 </div>
 </div>
 {{end}}
 </div>
 
+<script>
+// Fleet layout (Cards/Grid/List) and what each camera shows (name/address/
+// stats), remembered per browser. No backend -- it only sets classes the
+// stylesheet reads, kept independent so switching view never loses the
+// show/hide choices.
+(function () {
+  var fleet = document.getElementById('fleet');
+  if (!fleet) return;
+  function lsGet(k, d) { try { return localStorage.getItem(k); } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } }
+
+  var viewSeg = document.querySelector('.fleet-view');
+  function applyView(v) {
+    fleet.classList.remove('view-cards', 'view-grid', 'view-list');
+    fleet.classList.add('view-' + v);
+    if (viewSeg) viewSeg.querySelectorAll('button').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.view === v ? 'true' : 'false');
+    });
+    lsSet('reostream.fleetView', v);
+  }
+  var v = lsGet('reostream.fleetView', 'cards') || 'cards';
+  applyView(v === 'list' ? 'list' : 'cards');
+  if (viewSeg) viewSeg.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-view]');
+    if (b) applyView(b.dataset.view);
+  });
+
+  var showGroup = document.querySelector('.fleet-show');
+  var hidden = (lsGet('reostream.fleetHidden', '') || '').split(',').filter(Boolean);
+  function applyShow() {
+    ['name', 'address', 'stats'].forEach(function (k) {
+      var off = hidden.indexOf(k) >= 0;
+      fleet.classList.toggle('hide-' + k, off);
+      if (showGroup) {
+        var b = showGroup.querySelector('button[data-show="' + k + '"]');
+        if (b) b.setAttribute('aria-pressed', off ? 'false' : 'true');
+      }
+    });
+  }
+  applyShow();
+  if (showGroup) showGroup.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-show]');
+    if (!b) return;
+    var k = b.dataset.show, i = hidden.indexOf(k);
+    if (i >= 0) hidden.splice(i, 1); else hidden.push(k);
+    lsSet('reostream.fleetHidden', hidden.join(','));
+    applyShow();
+  });
+})();
+</script>
 <script src="/assets/mpegts.js"></script>
 <script src="/assets/snapshot.js"></script>
 <script src="/assets/dashboard.js"></script>
 {{end}}
 
 {{define "cameravideo"}}
-<div class="cam-video"{{if .Tile.Playable}} data-src="{{.Tile.URL}}" data-autoplay="1"{{if .Tile.ExternURL}} data-extern="{{.Tile.ExternURL}}"{{end}}{{end}}>
+{{if .Tile.Battery}}<div class="cam-video" data-src="{{.Tile.Still}}" data-live="{{.Tile.URL}}" data-battery="1">{{else}}<div class="cam-video"{{if .Tile.Playable}} data-src="{{.Tile.URL}}" data-autoplay="1"{{if .Tile.ExternURL}} data-extern="{{.Tile.ExternURL}}"{{end}}{{end}}>{{end}}
 {{/* Filled by dashboard.js, which decodes one frame in the browser and
      draws it here. It starts empty rather than pointing at the keyframe
      endpoint: that endpoint serves the raw elementary stream, which no
@@ -113,9 +163,10 @@
 {{if .Tile.Playable}}
 <video muted playsinline hidden></video>
 <button type="button" class="play-btn" aria-label="Play {{.Camera}}">&#9654;</button>
-<span class="caption">press &#9654; for live</span>
+{{if and .Tile.Battery (not .Tile.Still)}}<span class="caption">Asleep. Press play to wake it (uses battery)</span>{{end}}
+{{if .Tile.StillNote}}<span class="still-note">{{.Tile.StillNote}}</span>{{end}}
 {{else}}
-<span class="caption">no browser playable stream &mdash; this camera is HEVC only</span>
+<span class="caption">{{or .Tile.Caption "Waiting for video"}}</span>
 {{end}}
 </div>
 <script>

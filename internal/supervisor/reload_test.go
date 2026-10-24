@@ -144,8 +144,7 @@ func TestReloadRejectsAnInvalidCameraListWithoutTouchingAnything(t *testing.T) {
 	}
 }
 
-// TestValidateCatchesWhatConfigLoadCannot is Finding 4 from the 2026-09-10
-// review: a camera's rtsp entries pass config.Config.Validate whenever the
+// TestValidateCatchesWhatConfigLoadCannot: a camera's rtsp entries pass config.Config.Validate whenever the
 // candidate config's own [rtsp] section is present, but that says nothing
 // about whether THIS Supervisor's RTSP server actually exists. A daemon
 // that booted with no [rtsp] section has a nil sinkFor for its whole life;
@@ -175,8 +174,7 @@ func TestValidateCatchesWhatConfigLoadCannotAboutRTSPWiring(t *testing.T) {
 	}
 }
 
-// TestReloadRefusedOnceShuttingDown is Finding 5 from the 2026-09-10
-// review: a Reload racing shutdown can leave a stream-stop unwaited when
+// TestReloadRefusedOnceShuttingDown: a Reload racing shutdown can leave a stream-stop unwaited when
 // the process exits right after Run returns. Refusing any Reload that
 // starts once ctx is already done closes the window for a Reload that has
 // not yet begun; TestReloadRacingShutdownIsFullyAwaited below covers the

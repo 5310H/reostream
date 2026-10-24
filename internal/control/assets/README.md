@@ -16,8 +16,15 @@ This directory holds the only third party file in this repository.
   does not fill in the "[name of copyright owner]" line; the copyright
   holder per the package's own `package.json` `author` field is zheng qian
   <xqq@xqq.im> (project author/maintainer of xqq/mpegts.js).
-- SHA-256 of `mpegts.js` as committed:
+- SHA-256 of the upstream `mpegts.js@1.8.2` file:
   `bda31748736a69cb610c2edf4623e633f1f4f47b5bda83668c8d287e51b0c3a8`
+- Modified (Apache-2.0 section 4(b)): both AAC config builders (the FLV and
+  the TS demuxer) normally relabel AAC-LC as HE-AAC (`mp4a.40.5`) on any
+  browser that is not Firefox or Android. Reolink cameras send 16 kHz mono
+  AAC-LC, and the relabelled stream played silent. The change keeps the
+  Android branch's behaviour everywhere: the stream is signalled as the
+  AAC-LC it is. A notice at the top of the file says so. SHA-256 of
+  `mpegts.js` as committed: `8a41c009789b07abc1f76d69a3c71fb15c871db503f29a41d9e1b7b893b4c50b`
 - NOTICE file: none exists upstream. The npm package file listing for
   `mpegts.js@1.8.2` has no `NOTICE` entry, and both
   `https://raw.githubusercontent.com/xqq/mpegts.js/master/NOTICE` and

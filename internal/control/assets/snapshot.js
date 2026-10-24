@@ -8,14 +8,12 @@
 // end of the buffer on play covers the case where it has already drifted
 // before those take effect.
 window.reostreamPlayer = function (url, video) {
-  var player = mpegts.createPlayer({
-    type: 'mpegts',
-    isLive: true,
-    url: url,
-    liveBufferLatencyChasing: true,
-    liveBufferLatencyMaxLatency: 3.0,
-    liveBufferLatencyMinRemain: 0.5
-  });
+  // No liveBufferLatencyChasing. It keeps a timer polling the SourceBuffer,
+  // and a player that has been destroyed leaves that timer behind: one page
+  // load measured 7,597 exceptions reading "buffered" off a SourceBuffer
+  // removed from its media source, which is what made the page crawl. The
+  // seek below does the same job at the only moment it matters.
+  var player = mpegts.createPlayer({type: 'mpegts', isLive: true, url: url});
   if (video) {
     video.addEventListener('play', function () {
       try {
@@ -43,6 +41,10 @@ window.reostreamPlayer = function (url, video) {
 window.reostreamSnapshots = function (containers) {
   if (!window.mpegts || !mpegts.isSupported()) return;
   var queue = Array.prototype.slice.call(containers).filter(function (c) {
+    // A tile that plays by itself needs no snapshot: it shows live video,
+    // and it keeps its own last frame when it stops. Running both meant
+    // two players for one container, fighting over one video element.
+    if (c.dataset.autoplay) return false;
     return c.dataset.src && c.querySelector('img') && c.querySelector('video');
   });
 
@@ -66,10 +68,6 @@ window.reostreamSnapshots = function (containers) {
       video.hidden = true;
       if (drew) {
         img.hidden = false;
-        // The caption invites a press for live; with a picture behind it
-        // that reads as a label for what is already there.
-        var cap = container.querySelector('.caption');
-        if (cap) cap.textContent = 'press ▶ for live';
       }
       next();
     }
@@ -106,4 +104,42 @@ window.reostreamSnapshots = function (containers) {
   }
 
   next();
+};
+
+
+// Sound: off unless this browser turned it on before. Every player follows
+// the speaker button, so the choice made on one camera holds on the next.
+window.reostreamAudio = {
+  wanted: function () {
+    try { return localStorage.getItem('reostream.audio') === 'on'; } catch (e) { return false; }
+  },
+  // Start video with the remembered sound setting and keep the setting in
+  // step with the speaker button. A browser that refuses to start with sound
+  // (no tap yet) gets the picture muted rather than nothing at all.
+  play: function (video) {
+    var self = this;
+    if (!video.dataset.audioFollow) {
+      video.dataset.audioFollow = '1';
+      video.addEventListener('volumechange', function () {
+        // A change this code made is not the viewer's choice.
+        if (video._reoSkip) { video._reoSkip = false; return; }
+        try { localStorage.setItem('reostream.audio', video.muted || video.volume === 0 ? 'off' : 'on'); } catch (e) {}
+      });
+    }
+    var setMuted = function (m) {
+      if (video.muted === m) return;
+      video._reoSkip = true;
+      video.muted = m;
+    };
+    setMuted(!self.wanted());
+    var p = video.play();
+    if (p && p.catch) {
+      p.catch(function () {
+        if (video.muted) return;
+        setMuted(true);
+        var q = video.play();
+        if (q && q.catch) q.catch(function () {});
+      });
+    }
+  }
 };

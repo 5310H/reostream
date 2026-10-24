@@ -16,7 +16,7 @@ import (
 
 // TestRunCarriesAudioFromTheCameraToTheHub proves audio actually reaches a
 // subscriber through the real Run loop, not just that ts.Muxer can carry
-// it. Task 4 shipped a muxer able to mux audio attached to a stream.Run
+// it. A muxer able to mux audio was once attached to a stream.Run
 // that never asked it to, which is the same failure the muxer was built to
 // fix, wearing different clothes: production had declared an audio role
 // for days while the pipe silently dropped every audio frame. This test

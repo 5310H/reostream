@@ -30,8 +30,12 @@ func videoFrames(t *testing.T) []baichuan.Frame {
 	return out
 }
 
-// After a camera reboot, RTP timestamps should continue from where they
-// were plus the outage, not freeze or jump.
+// The RTSP session outlives the camera connection. When the camera comes
+// back from a reboot its clock has started over, and a reader following the
+// RTP timestamps must see them carry on from where they were, plus the real
+// length of the outage, not freeze or leap. Reproduced on 2026-10-19 after
+// the fleet's Sunday 02:00 scheduled reboot: a freeze of up to 35 minutes or
+// a jump of up to 71, depending on where the old clock had got to.
 func TestVideoTimestampsContinueAcrossACameraReboot(t *testing.T) {
 	frames := videoFrames(t)
 	key, p1, p2 := frames[0], frames[1], frames[2]
@@ -40,8 +44,9 @@ func TestVideoTimestampsContinueAcrossACameraReboot(t *testing.T) {
 	s := &Stream{now: func() time.Time { return wall }}
 	s.Connected()
 
-	// 15 min of uptime, 40ms frames. Repeat the keyframe until the stream
-	// has probed for audio and built its description.
+	// Fifteen minutes into the camera's uptime, one frame every 40ms. With
+	// no audio in sight the stream needs audioProbeFrames frames before it
+	// describes itself, so the keyframe is repeated until it does.
 	key.Micros = 900_000_000
 	p1.Micros = 900_040_000
 	for !s.Ready() {
@@ -70,7 +75,13 @@ func TestVideoTimestampsContinueAcrossACameraReboot(t *testing.T) {
 	}
 }
 
-// After a reconnect the SDP is rebuilt only if the parameter sets changed.
+// A keyframe's parameter sets go into the SDP, and a camera that comes back
+// from a reboot with different ones (a changed resolution or encoder
+// setting) would leave every reader decoding against stale sprop values.
+// After a reconnect the first keyframe is checked against the description,
+// and the description rebuilt only if they differ: rebuilding drops every
+// reader, which is the right price for a changed stream and the wrong one
+// for a camera that merely rebooted.
 func TestDescriptionIsRebuiltWhenParameterSetsChangeAfterReconnect(t *testing.T) {
 	frames := captureFrames(t)
 	_, s := serverWithStream(t, "reboot")

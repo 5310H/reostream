@@ -1,0 +1,48 @@
+{{/*
+  appsettings.html: reostream's own settings, per the redesign -- one Settings
+  entry in the sidebar, with Password, Config file, Camera list and About in
+  a list down the left. Each item keeps its own page and handler; this is the
+  frame they share. The argument is the current item's id.
+*/}}
+{{define "appsettings-open"}}
+<header class="camhead">
+<h1>Settings</h1>
+</header>
+<div class="cam-settings">
+<nav class="catnav" aria-label="reostream settings">
+<p class="catnav-title">reostream</p>
+<ul>
+<li><a href="/password"{{if eq . "password"}} aria-current="page"{{end}}>Password</a></li>
+<li><a href="/config"{{if eq . "config"}} aria-current="page"{{end}}>Config file</a></li>
+<li><a href="/cameras"{{if eq . "cameras"}} aria-current="page"{{end}}>Camera list</a></li>
+<li><a href="/settings/nvr"{{if eq . "nvr"}} aria-current="page"{{end}}>Connect to NVR</a></li>
+<li><a href="/settings/events"{{if eq . "events"}} aria-current="page"{{end}}>Events</a></li>
+<li><a href="/settings/about"{{if eq . "about"}} aria-current="page"{{end}}>About</a></li>
+</ul>
+</nav>
+<div class="cam-pane">
+{{end}}
+{{define "appsettings-close"}}
+</div>
+</div>
+{{end}}
+
+{{/* about.html's body lives here too, to keep the template list short. */}}
+{{define "aboutbody"}}
+{{template "appsettings-open" "about"}}
+<section>
+<div class="sec-head"><h2>About</h2></div>
+<div class="setting"><p>Version</p><div class="control"><span class="mono">{{.Version}}</span></div></div>
+<div class="setting"><p>Config file</p><div class="control"><span class="mono">{{.ConfigPath}}</span></div></div>
+<div class="setting"><p>Streams (HTTP)</p><div class="control"><span class="mono">{{.Listen}}</span><span class="hint">Always on: MPEG-TS for recorders and this page's players.</span></div></div>
+<div class="setting"><p>Streams (RTSP)</p><div class="control"><span class="mono">{{if .RTSPListen}}{{.RTSPListen}}{{else}}off{{end}}</span><span class="hint">Opt-in, set by [rtsp] listen in the config file.</span></div></div>
+<div class="setting"><p>This page</p><div class="control"><span class="mono">{{.ControlListen}}</span></div></div>
+<div class="setting"><p>Cameras</p><div class="control"><span class="mono">{{.Cameras}}</span></div></div>
+<p class="hint">Changing a listen address is done in the <a href="/config">config file</a> and takes effect when reostream restarts.</p>
+</section>
+<section>
+<div class="sec-head"><h2>License</h2></div>
+<p class="hint">reostream is free software under the GNU AGPL v3, with a commercial license available. Source: <a href="https://github.com/VoltTech21/reostream" target="_blank" rel="noopener noreferrer">github.com/VoltTech21/reostream</a>. The in-browser player is mpegts.js (Apache 2.0).</p>
+</section>
+{{template "appsettings-close"}}
+{{end}}

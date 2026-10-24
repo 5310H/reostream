@@ -28,7 +28,7 @@ import (
 //
 // Kind is never a Go type. "warning" fields carry no XPath at all: they
 // exist only to put text next to a control, which is how the
-// UnsafeToRewrite label from Task 5 surfaces here without hiding the
+// UnsafeToRewrite label surfaces here without hiding the
 // control it warns about.
 type Field struct {
 	Label string
@@ -50,6 +50,14 @@ type Field struct {
 	// the Slug of the row that toggle switches on and off.
 	Slug    string
 	Governs string
+
+	// NoCopy keeps a field out of "Copy to other cameras": a camera's own
+	// name is not something to give every other camera.
+	NoCopy bool
+
+	// Help is the one line behind the field's "i". Empty for a field whose
+	// label says everything.
+	Help string
 
 	// Choices, on a Kind "choice" field, are the values offered as stops.
 	// Only the value the camera was seen holding is observed; the rest are
@@ -119,6 +127,46 @@ type Group struct {
 	// camera rebuild its pipeline. Blurb is the one plain line under it.
 	InterruptsStream bool
 	Blurb            string
+	// Reboots marks a group whose every write restarts the camera (the
+	// encoder blocks do this). It is the highest of the three save tiers.
+	Reboots bool
+	// Untested marks a group whose fields were read off a real camera but
+	// whose writes nobody has yet watched take effect on one. It shows as
+	// the hollow dot, the redesign's fourth tier.
+	Untested bool
+}
+
+// Tier is the save tier shown as a coloured dot before every setting in the
+// group, per the redesign: instant (nothing stops), interruption (the
+// stream rebuilds briefly), reboot (the camera restarts). There is no
+// "untested" tier here -- every curated setting has been exercised on a real
+// camera; untested is reserved for the few things that genuinely are not
+// (PTZ auto-tracking), which live outside these groups.
+func (g Group) Tier() string {
+	switch {
+	case g.Untested:
+		return "untested"
+	case g.Reboots:
+		return "reboot"
+	case g.InterruptsStream || g.ConfirmReason != "":
+		return "interruption"
+	default:
+		return "instant"
+	}
+}
+
+// TierLabel is the plain sentence behind the dot, for its title/popover.
+func (g Group) TierLabel() string {
+	switch g.Tier() {
+	case "reboot":
+		return "Saving this restarts the camera"
+	case "untested":
+		return "Not yet verified on a camera"
+	case "interruption":
+		return "Saving this briefly interrupts the stream"
+	default:
+		return "Saves instantly, nothing stops"
+	}
 }
 
 // The overlay corner table, and how it was established.
@@ -160,6 +208,7 @@ type Group struct {
 const (
 	osdNearEdge = "1"
 	osdFarEdge  = "65536"
+	osdCenter   = "65537"
 )
 
 // osdCorner is one row of the table above: the wording a person picks and
@@ -175,22 +224,15 @@ type osdCorner struct {
 func osdCorners() []osdCorner {
 	return []osdCorner{
 		{"top left", osdNearEdge, osdNearEdge},
+		// Top centre: a TrackMix holds its timestamp at 65537,1 and draws it
+		// centred along the top edge (seen on its own stream, 2026-10-23),
+		// which is also the value reported in issue #10.
+		{"top center", osdCenter, osdNearEdge},
 		{"top right", osdFarEdge, osdNearEdge},
 		{"bottom left", osdNearEdge, osdFarEdge},
 		{"bottom right", osdFarEdge, osdFarEdge},
 	}
 }
-
-// irLivesInImageWarning replaces an earlier, wrong claim that no writable
-// infrared message exists at all. It does: InputAdvanceCfg/DayNight/IrcutMode
-// is a real field in the same document isp get/isp set already carry (see
-// isp.xml in testdata/livefixtures), alongside DayNight/mode and
-// DayNight/Threshold. "fty ir_cut info" (371) is a different, read-only
-// message; it was the one this codebase checked, which is how the wrong
-// claim happened. The Infrared cut filter field below is that field,
-// carrying the same unsafe-to-rewrite caveat as the rest of Image, because
-// it shares Image's block.
-const irLivesInImageWarning = "the infrared cut filter is changed from the Image group above: it shares that block and its stream-interruption caveat, not a separate one."
 
 // groups declares the curated Picture and OSD surface plus Lights and IR:
 // what a person actually changes, so they do not have to edit raw XML.
@@ -201,8 +243,8 @@ const irLivesInImageWarning = "the infrared cut filter is changed from the Image
 // "Osd/osdChannel/name" and "Isp/Isp/bright" that do not exist in any
 // document this camera actually sends (the real names are
 // "OsdChannelName/name" and "VideoInput/bright"), which is exactly the
-// kind of field this codebase's own honesty rule (Task 8 and Finding 3)
-// exists to catch rather than paper over with a blank input box.
+// kind of field that must be caught rather than papered over with a
+// blank input box.
 //
 // The status LED (message 209) is here because it is proven; the
 // floodlight is not a Field at all, because its write lives over CGI, not
@@ -219,8 +261,7 @@ const irLivesInImageWarning = "the infrared cut filter is changed from the Image
 func groups() []Group {
 	return []Group{
 		{
-			Title: "Camera name and overlay",
-			Blurb: "What the camera burns into the picture. Safe to change while streaming.",
+			Title: "Name and timestamp",
 			// "osd get" (44) is the live document on the RLC-810A this was
 			// verified against; "get osd" (29) answered 405 there but is a
 			// second, independently recovered pair for the same settings
@@ -230,8 +271,13 @@ func groups() []Group {
 			// discovered rather than assumed.
 			Blocks: []string{"osd get", "get osd"},
 			Fields: []Field{
-				{Label: "Camera name", XPath: "OsdChannelName/name", Kind: "text", Slug: "osd-name"},
+				{Label: "Camera name", XPath: "OsdChannelName/name", Kind: "text", Slug: "osd-name", NoCopy: true, Help: "The name drawn on the picture."},
 				{Label: "Show camera name", XPath: "OsdChannelName/enable", Kind: "toggle", Slug: "osd-name-show", Governs: "osd-name-position"},
+				// The Reolink logo burned into the picture. It lives in the
+				// same OsdChannelName element as the name overlay (verified on
+				// a TrackMix: <enWatermark>1</enWatermark>), so it rides the
+				// same osd read/write pair. 0 removes it.
+				{Label: "Reolink watermark", XPath: "OsdChannelName/enWatermark", Kind: "toggle", Slug: "osd-watermark", Help: "The Reolink logo drawn on the picture."},
 				// Two elements, one control. See the corner table above for
 				// what the values mean and how that was established.
 				{Label: "Camera name position", XPath: "OsdChannelName/topLeftX", YPath: "OsdChannelName/topLeftY", Kind: "position", Slug: "osd-name-position"},
@@ -240,35 +286,28 @@ func groups() []Group {
 			},
 		},
 		{
-			Title:            "Image",
-			Blocks:           []string{"isp get"},
-			InterruptsStream: true,
-			Blurb:            "How the sensor exposes and colors the picture. Every save briefly interrupts the stream.",
+			Title:  "Image",
+			Blocks: []string{"isp get"},
+			// Instant: brightness, contrast, saturation, color mode and flip
+			// change the live picture without dropping the stream (watched
+			// on a TrackMix and an RLC-810A, 2026-10-23).
 			Fields: []Field{
 				{Label: "Brightness", XPath: "VideoInput/bright", Kind: "number", Slug: "image-brightness"},
 				{Label: "Contrast", XPath: "VideoInput/contrast", Kind: "number", Slug: "image-contrast"},
 				{Label: "Saturation", XPath: "VideoInput/saturation", Kind: "number", Slug: "image-saturation"},
-				{Label: "Day and night mode", XPath: "InputAdvanceCfg/DayNight/mode", Kind: "choice", Slug: "image-daynight",
+				{Label: "Day and night mode", XPath: "InputAdvanceCfg/DayNight/mode", Kind: "choice", Slug: "image-daynight", Help: "Auto switches to black and white with infrared when it gets dark.",
 					Choices: []Choice{{"auto", "Auto"}, {"color", "Color"}, {"blackAndWhite", "Black & white"}}},
-				// The infrared cut filter, corrected: see
-				// irLivesInImageWarning's comment for why this exists at
-				// all, despite an earlier version of this page claiming
-				// it did not.
-				// A reading, not a control. Every camera on the fleet this
-				// was built against reports "ir" and nothing has established
-				// what else the firmware accepts, so a dropdown would be a
-				// guess presented as a fact and a text box asks the operator
-				// to guess instead. This field moves a physical part, so
-				// neither is good enough. Advanced edits it by xpath for
-				// anyone who does know a value to try.
-				{Label: "Infrared cut filter", XPath: "InputAdvanceCfg/DayNight/IrcutMode", Kind: "reading", Slug: "image-ircut"},
+				// The picture's orientation, for a camera mounted upside down
+				// or seen in a mirror. Same isp document; read on a TrackMix
+				// (1,1, ceiling mounted) and an RLC-810A (0,0).
+				{Label: "Flip horizontally", XPath: "InputAdvanceCfg/mirror", Kind: "toggle", Slug: "image-mirror", Help: "For a camera seen in a mirror or mounted facing the other way."},
+				{Label: "Flip vertically", XPath: "InputAdvanceCfg/flip", Kind: "toggle", Slug: "image-flip", Help: "For a camera mounted upside down, on a ceiling."},
 			},
 		},
 		{
-			Title:         "Lights and IR",
+			Title:         "Lights",
 			Blocks:        []string{"led get"},
 			ConfirmReason: lightsConfirmReason,
-			Blurb:         "Lights on the camera itself. Each change asks again first.",
 			Fields: []Field{
 				// LedState/state is a string enum ("auto" on the camera
 				// this was verified against), not the 0/1 boolean this
@@ -277,9 +316,90 @@ func groups() []Group {
 				// values for. Stops for the firmware's spellings, and the
 				// camera's own value is always offered as well, so a camera
 				// holding something else is shown it rather than snapped.
-				{Label: "Status LED", XPath: "LedState/state", Kind: "choice", Slug: "led-state",
+				//
+				// It is the INFRARED ILLUMINATOR, not the indicator on the
+				// front, although this page called it "Status LED" until
+				// 2026-10-08. The block names neither field, so the two
+				// protocols were lined up against each other to settle it:
+				//
+				//   camera   LedState/state   CGI GetIrLights   LedState/lightState   CGI GetPowerLed
+				//   fisheye  auto             Auto              open                  On
+				//   pano     open             On                open                  On
+				//
+				// state tracks IrLights exactly. The mislabel mattered:
+				// somebody switching off what reads as a small indicator
+				// light was switching off the camera's night vision.
+				{Label: "Infrared light", XPath: "LedState/state", Kind: "choice", Slug: "led-state", Help: "Night vision. Off leaves night images dark.",
 					Choices: []Choice{{"auto", "Auto"}, {"open", "On"}, {"close", "Off"}}},
-				{Label: irLivesInImageWarning, Kind: "warning"},
+				// And the indicator itself, which this page never offered.
+				// Same block, so it costs no extra read and is written the
+				// same way. The camera's own CGI range for it is On/Off
+				// with no auto, which is what a power indicator would have.
+				{Label: "Status LED", XPath: "LedState/lightState", Kind: "choice", Slug: "led-light-state", Help: "The small light on the front of the camera.",
+					Choices: []Choice{{"open", "On"}, {"close", "Off"}}},
+			},
+		},
+		// Alerts. Every block below was read off a TrackMix (2026-10-23);
+		// the on/off switches live in the *task blocks (ftptask, emailtask,
+		// pushtask), not in the server settings. Each task block also holds
+		// a 24x7 schedule per alarm type (valueTable), which these pages
+		// leave as the camera has it. Passwords are left out on purpose:
+		// a save reports the value it wrote, and a password must not be
+		// put on screen.
+		{
+			Title:    "FTP upload",
+			Blocks:   []string{"ftp task get"},
+			Blurb:    "Sends clips and pictures on detection.",
+			Untested: true,
+			Fields: []Field{
+				{Label: "Upload to FTP", XPath: "FtpTask/enable", Kind: "toggle", Slug: "ftp-enable", Help: "Uploads on detection, on the schedule set in the Reolink app."},
+			},
+		},
+		{
+			Title:    "FTP server",
+			Blocks:   []string{"ftp cfg get"},
+			Blurb:    "Set the password in the Reolink app.",
+			Untested: true,
+			Fields: []Field{
+				{Label: "Server", XPath: "Ftp/server", Kind: "text", Slug: "ftp-server"},
+				{Label: "Port", XPath: "Ftp/port", Kind: "text", Slug: "ftp-port"},
+				{Label: "User name", XPath: "Ftp/userName", Kind: "text", Slug: "ftp-user"},
+				{Label: "Folder", XPath: "Ftp/remoteDir", Kind: "text", Slug: "ftp-dir"},
+				{Label: "Folder per day", XPath: "Ftp/autoDir", Kind: "toggle", Slug: "ftp-autodir", Help: "Puts each day in its own folder."},
+			},
+		},
+		{
+			Title:    "Email alerts",
+			Blocks:   []string{"email task get"},
+			Blurb:    "Emails on detection.",
+			Untested: true,
+			Fields: []Field{
+				{Label: "Send email alerts", XPath: "EmailTask/enable", Kind: "toggle", Slug: "email-enable", Help: "Emails on detection, on the schedule set in the Reolink app."},
+			},
+		},
+		{
+			Title:    "Email server",
+			Blocks:   []string{"email cfg get"},
+			Blurb:    "Set the password in the Reolink app.",
+			Untested: true,
+			Fields: []Field{
+				{Label: "SMTP server", XPath: "Email/smtpServer", Kind: "text", Slug: "email-server"},
+				{Label: "SMTP port", XPath: "Email/smtpPort", Kind: "text", Slug: "email-port"},
+				{Label: "Use SSL", XPath: "Email/ssl", Kind: "toggle", Slug: "email-ssl"},
+				{Label: "Sender address", XPath: "Email/userName", Kind: "text", Slug: "email-user"},
+				{Label: "Recipient 1", XPath: "Email/address1", Kind: "text", Slug: "email-to1"},
+				{Label: "Recipient 2", XPath: "Email/address2", Kind: "text", Slug: "email-to2"},
+				{Label: "Recipient 3", XPath: "Email/address3", Kind: "text", Slug: "email-to3"},
+				{Label: "Attach a picture", XPath: "Email/attachment", Kind: "toggle", Slug: "email-attach", Help: "Adds a snapshot to each alert email."},
+			},
+		},
+		{
+			Title:    "Push notifications",
+			Blocks:   []string{"push task get"},
+			Blurb:    "To phones with the Reolink app.",
+			Untested: true,
+			Fields: []Field{
+				{Label: "Send push notifications", XPath: "PushTask/enable", Kind: "toggle", Slug: "push-enable", Help: "Delivered through Reolink's cloud to the Reolink app."},
 			},
 		},
 	}

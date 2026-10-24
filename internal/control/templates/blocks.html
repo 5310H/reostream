@@ -13,15 +13,7 @@
   the camera.
 */}}
 {{define "body"}}
-<h1>{{.Camera.Name}}</h1>
-<p class="subtitle">{{.Camera.Address}}</p>
-
-<nav class="tabs">
-<a href="/cameras/{{.Camera.Name}}">Overview</a>
-<a href="/cameras/{{.Camera.Name}}/advanced" aria-current="page">Advanced</a>
-<a href="/cameras/{{.Camera.Name}}/time">Time</a>
-<a href="/cameras/{{.Camera.Name}}/accounts">Accounts</a>
-</nav>
+{{template "camsettings-open" .Head}}
 
 {{if .Err}}<p class="outcome-refused">{{.Err}}</p>{{end}}
 
@@ -75,4 +67,5 @@
 {{end}}
 {{end}}
 </details>
+{{template "camsettings-close"}}
 {{end}}

@@ -70,3 +70,16 @@ func streamOf(name string) string {
 	}
 	return name
 }
+
+// stateLabel is how a camera's state reads on a badge. "streaming" says
+// what reostream is doing with the camera, which on a tile that is not
+// playing reads as if it were; "healthy" says what a person wants to know.
+func stateLabel(state string) string {
+	switch state {
+	case "streaming":
+		return "healthy"
+	case "":
+		return "unknown"
+	}
+	return state
+}

@@ -11,8 +11,7 @@ import (
 	"github.com/VoltTech21/reostream/internal/control"
 )
 
-// TestURLsPageShowsAConfigLoadError is Finding 6 from the 2026-09-10
-// review: serveURLs set page.Error on a LoadRaw failure, but the template
+// TestURLsPageShowsAConfigLoadError: serveURLs set page.Error on a LoadRaw failure, but the template
 // never rendered it, so a first-run user with a broken config got a
 // silently empty Frigate block on the one page that exists to hand them
 // URLs.

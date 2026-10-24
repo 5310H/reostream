@@ -27,6 +27,10 @@ type Camera struct {
 	// channel 0, which is also what leaving it out means.
 	Channel int
 
+	// UID marks a battery camera, reached over UDP by this id instead of
+	// TCP port 9000.
+	UID string
+
 	// RTSP names which of this camera's streams to serve over RTSP. Absent
 	// means none, and every stream still reaches the HTTP output either way.
 	RTSP []string
@@ -58,7 +62,55 @@ type Config struct {
 	Listen  string
 	RTSP    *RTSPConfig    `toml:"rtsp"`
 	Control *ControlConfig `toml:"control"`
+	FTP     *FTPConfig     `toml:"ftp"`
+	Events  *EventsConfig  `toml:"events"`
+	Clock   *ClockConfig   `toml:"clock"`
 	Cameras []Camera       `toml:"camera"`
+}
+
+// ClockConfig keeps the cameras' clocks right.
+type ClockConfig struct {
+	// DailySync is the time of day, "HH:MM" on this machine's clock, at
+	// which every wired camera's clock is set from this machine's. Empty
+	// is off.
+	DailySync string `toml:"daily_sync"`
+}
+
+// EventsConfig relays each camera's own detections (motion, person,
+// vehicle, animal) as they happen. Either destination may be left empty.
+type EventsConfig struct {
+	// MQTT is the broker, host:port; MQTTUser and MQTTPassword its login.
+	MQTT         string `toml:"mqtt"`
+	MQTTUser     string `toml:"mqtt_user"`
+	MQTTPassword string `toml:"mqtt_password"`
+	// Prefix starts every topic; "reostream" when empty.
+	Prefix string
+	// Frigate is Frigate's API, e.g. "http://192.0.2.5:5000": an object the
+	// camera sees becomes a Frigate event on the camera of the same name.
+	Frigate string
+	// FrigateMotion also sends plain motion to Frigate, which finds motion
+	// itself, so it is off unless asked for.
+	FrigateMotion bool `toml:"frigate_motion"`
+}
+
+// FTPConfig is the clip receiver: cameras upload each recording here over
+// FTP, logging in with their own camera name and this password. Absent, no
+// receiver runs.
+type FTPConfig struct {
+	// Listen is the control port, ":2121" when empty.
+	Listen string
+	// Passive is the data port range, "2122-2131" when empty.
+	Passive string
+	// Host is the address cameras are told to send data to; set it when
+	// reostream runs behind NAT (Docker's bridge network).
+	Host string
+	// Dir holds the clips, one folder per camera; "clips" next to the
+	// config file when empty.
+	Dir string
+	// Password is what every camera logs in with.
+	Password string
+	// KeepDays deletes clips older than this; 0 keeps them forever.
+	KeepDays int `toml:"keep_days"`
 }
 
 // NormalizeAddr applies the same default-port rule baichuan.Dial does, so
@@ -83,6 +135,9 @@ var validStreamNames = map[string]bool{
 	"main":   true,
 	"sub":    true,
 	"extern": true,
+	// The TrackMix's zoom lens, read from the camera's own RTSP server:
+	// it is not available over Baichuan. See internal/stream/native.go.
+	"zoom": true,
 }
 
 // Load reads and validates the config file at path. A camera address,
@@ -227,7 +282,9 @@ func (c *Config) Validate() error {
 		}
 		seenNames[cam.Name] = true
 
-		if len(cam.Streams) == 0 {
+		// A battery camera may list no streams: reostream then only reaches
+		// it on demand (settings, recordings) and never holds it awake.
+		if len(cam.Streams) == 0 && cam.UID == "" {
 			return fmt.Errorf("camera %q has no streams", cam.Name)
 		}
 		seenStreams := make(map[string]bool, len(cam.Streams))

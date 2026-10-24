@@ -45,6 +45,18 @@ type Server struct {
 
 	// sup is optional; see SetSupervisor in status.go.
 	sup *supervisor.Supervisor
+
+	// wake lets a request subscribe to a battery camera's on-demand hub,
+	// which wakes the camera. Only the signed-in control listener sets it.
+	wake bool
+}
+
+// AllowWake lets this server's viewers wake battery cameras. Only for a
+// listener behind the control password: an open port would let any
+// recorder hold a battery camera awake.
+func (s *Server) AllowWake() *Server {
+	s.wake = true
+	return s
 }
 
 // New builds a Server over src. The header each client receives on connect
@@ -102,7 +114,7 @@ func (s *Server) lookup(stem string) (*hub.Hub, bool) {
 	if h, ok := s.src.Hub(stem + "/main"); ok {
 		return h, true
 	}
-	for suffix, stream := range map[string]string{"_sub": "sub", "_extern": "extern"} {
+	for suffix, stream := range map[string]string{"_sub": "sub", "_extern": "extern", "_zoom": "zoom"} {
 		if cam, cut := strings.CutSuffix(stem, suffix); cut {
 			if h, ok := s.src.Hub(cam + "/" + stream); ok {
 				return h, true
@@ -116,6 +128,10 @@ func (s *Server) lookup(stem string) (*hub.Hub, bool) {
 // mux's wildcard segments can't express "/<name>.keyframe" alongside
 // "/<name>.ts" as separate registered patterns (see Handler).
 func (s *Server) serveStreamOrKeyframe(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, ".still.ts") {
+		s.serveStill(w, r)
+		return
+	}
 	if strings.HasSuffix(r.URL.Path, ".keyframe") {
 		s.serveKeyframe(w, r)
 		return
@@ -137,6 +153,10 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 	h, ok := s.lookup(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), ".ts"))
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	if h.OnDemand() && !s.wake {
+		http.Error(w, "battery camera: it streams only while watched in reostream", http.StatusForbidden)
 		return
 	}
 

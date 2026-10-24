@@ -309,6 +309,21 @@ func TestChannelLoadsFromTheFile(t *testing.T) {
 	}
 }
 
+func TestUIDIsRead(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.toml")
+	body := "[[camera]]\nname = \"porch\"\naddress = \"192.0.2.7\"\nuid = \"95270000TESTUID1\"\nstreams = [\"sub\"]\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadRaw(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Cameras[0].UID; got != "95270000TESTUID1" {
+		t.Fatalf("uid = %q", got)
+	}
+}
+
 // A whole camera from the environment, as a Kubernetes Secret supplies it
 // (issue #4): the docs promise "$NAME" works for any value, and an address
 // or username left as a literal "$NAME" is dialed as a hostname.

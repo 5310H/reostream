@@ -6,9 +6,18 @@ import (
 	"fmt"
 )
 
-// EncStream is one stream's encoder settings. Size is the camera's string
-// ("4096*1152"); Width and Height must agree with it. GOP is the camera's
-// "interframe space" setting, a small number (1-2), not frames per GOP.
+// EncStream is one stream's encoder settings.
+//
+// Size is the camera's own spelling of the resolution, "4096*1152", with a
+// star rather than an x. Width and Height repeat it as numbers; the camera
+// sends all three and SetEnc is given all three back, because a size string
+// that disagrees with its own numbers is a value no camera was ever asked
+// to interpret.
+//
+// GOP is the interframe space, which is the vendor's own label for it: how
+// many frames pass between keyframes. The camera reports it in frames and
+// the range is small -- 1 to 2 on a main stream here -- so this is not the
+// dozens-of-frames GOP of a streaming encoder.
 type EncStream struct {
 	BitRate   int    `json:"bitRate"`
 	FrameRate int    `json:"frameRate"`
@@ -29,8 +38,15 @@ type Enc struct {
 	Extern EncStream `json:"extStream"`
 }
 
-// EncStreamOptions is what one stream accepts at a given Size. BitRates,
-// FrameRates, Profiles and VTypes are exact lists; other values are refused.
+// EncStreamOptions is what one stream will accept, as the camera reports
+// it rather than as anything here assumes.
+//
+// BitRates and FrameRates are the exact stops offered; a value not in the
+// list is refused by the camera. Profiles and VTypes likewise. GOPMin and
+// GOPMax bound the interframe space.
+//
+// Size is the resolution these options belong to, which is the subtlety of
+// this whole structure: see EncOptions.
 type EncStreamOptions struct {
 	Size       string
 	Width      int
@@ -42,20 +58,28 @@ type EncStreamOptions struct {
 	Profiles   []string
 	VTypes     []string
 
-	// Default is the camera's default for this size, not the current value.
+	// Default is what the camera calls the default for this size, which is
+	// not the same as the value in force.
 	DefaultBitRate   int
 	DefaultFrameRate int
 	DefaultGOP       int
 }
 
-// EncOptions is one resolution the camera supports. The camera returns one
-// per resolution, and bitrate/frame rate options depend on the resolution.
+// EncOptions is one whole combination the camera offers.
+//
+// The camera answers GetEnc's range with an ARRAY of these, one per
+// resolution it supports, and the bitrates and frame rates inside each are
+// only valid for that resolution. On the pano, 7680x2160 offers bitrates up
+// to 12288 and 4096x1152 stops at 10240. So "what bitrates may I choose" has
+// no answer until a resolution is chosen, and a form that presents the two
+// as independent lists will offer combinations the camera refuses.
 type EncOptions struct {
 	Main EncStreamOptions
 	Sub  EncStreamOptions
 }
 
-// encStreamRangeJSON is the wire shape of one stream's options.
+// encStreamRangeJSON is the wire shape of one stream's options. Kept
+// separate from EncStreamOptions so the JSON spelling stays in one place.
 type encStreamRangeJSON struct {
 	BitRate   []int                  `json:"bitRate"`
 	FrameRate []int                  `json:"frameRate"`
@@ -89,7 +113,12 @@ func (j encStreamRangeJSON) options() EncStreamOptions {
 	}
 }
 
-// GetEnc reads the encoder settings and the options the camera accepts.
+// GetEnc reads the encoder settings and every combination the camera says
+// it will accept.
+//
+// The range is the point of this call. Without it a form has to offer free
+// number boxes and learn what the camera refuses by refusing to work, and
+// the fields are not independent -- see EncOptions.
 func (c *Client) GetEnc(ctx context.Context, channel int) (current Enc, options []EncOptions, err error) {
 	value, _, rng, err := c.Get(ctx, "GetEnc", channel)
 	if err != nil {
@@ -103,7 +132,10 @@ func (c *Client) GetEnc(ctx context.Context, channel int) (current Enc, options 
 		return Enc{}, nil, fmt.Errorf("cgi: parse GetEnc: %w", err)
 	}
 
-	// Usually an array; accept a single object too.
+	// The range is an array on every camera measured, but a camera that
+	// offers exactly one combination could reasonably send an object. Try
+	// the array first and fall back, rather than failing the whole read and
+	// leaving the page with no options at all.
 	var asArray struct {
 		Enc []struct {
 			Main encStreamRangeJSON `json:"mainStream"`
@@ -132,8 +164,17 @@ func (c *Client) GetEnc(ctx context.Context, channel int) (current Enc, options 
 	return cur.Enc, options, nil
 }
 
-// SetEnc writes the full encoder block. Streams restart with the new
-// parameters, so readers may need to reconnect.
+// SetEnc writes the encoder settings.
+//
+// This re-encodes what the camera records and what every reader of it
+// receives. It is not a reboot like a fisheye mode change, but a recorder
+// holding the stream will see it stop and come back with different
+// parameters, which for an H.264 or H.265 consumer means waiting for the
+// next keyframe at best and a reconnect at worst.
+//
+// Every field is sent, not only the changed one. The camera takes the whole
+// block, and a partial write is how a stream ends up at a resolution with a
+// bitrate that belongs to a different one.
 func (c *Client) SetEnc(ctx context.Context, channel int, e Enc) error {
 	stream := func(s EncStream) map[string]any {
 		return map[string]any{

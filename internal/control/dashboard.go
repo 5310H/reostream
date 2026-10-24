@@ -103,9 +103,11 @@ func (s *Server) statusCards(urls RecorderURLs) []statusCard {
 	// and no camera password may reach a template, a response body, a log
 	// line or a URL.
 	address := make(map[string]string)
+	battery := make(map[string]bool)
 	if cams, err := s.fleet(); err == nil {
 		for _, c := range cams {
 			address[c.Name] = c.Address
+			battery[c.Name] = c.UID != ""
 		}
 	}
 	// A fleet that will not load costs this page its addresses, not the
@@ -132,6 +134,12 @@ func (s *Server) statusCards(urls RecorderURLs) []statusCard {
 	out := make([]statusCard, 0, len(groups))
 	for _, g := range groups {
 		card := statusCard{Camera: g.Camera, Address: address[g.Camera], Tile: g.Tile}
+		if !card.Tile.Playable {
+			card.Tile.Caption = tileCaption(battery[g.Camera], codecs[g.Camera])
+		}
+		if card.Tile.Battery {
+			card.Tile.Level = s.batteries.level(g.Camera, address[g.Camera])
+		}
 		for _, r := range g.Rows {
 			_, stream, _ := strings.Cut(r.Name, "/")
 			card.Streams = append(card.Streams, streamLine{
@@ -168,7 +176,7 @@ func streamRank(name string) int {
 }
 
 // stateRank orders stream states worst first for cameraState.
-var stateRank = map[string]int{"down": 4, "reconnecting": 3, "novideo": 2, "streaming": 1}
+var stateRank = map[string]int{"down": 4, "reconnecting": 3, "novideo": 2, "streaming": 1, "asleep": 0}
 
 // cameraState is the worst state among a camera's streams, or "idle" for
 // a camera with none reported.
@@ -178,6 +186,10 @@ func cameraState(rows []row) string {
 		if stateRank[r.State] > stateRank[worst] {
 			worst = r.State
 		}
+	}
+	// A battery camera with every stream asleep is asleep, not idle.
+	if worst == "idle" && len(rows) > 0 && rows[0].State == "asleep" {
+		return "asleep"
 	}
 	return worst
 }
@@ -267,9 +279,25 @@ func alerts(cards []statusCard) []Alert {
 func healthyCount(cards []statusCard) int {
 	n := 0
 	for _, c := range cards {
-		if c.State == "streaming" {
+		// Asleep is a battery camera doing what it should.
+		if c.State == "streaming" || c.State == "asleep" {
 			n++
 		}
 	}
 	return n
+}
+
+// tileCaption says why a tile has no picture. A battery camera with no
+// streams is asleep, not H.265, and a camera that has not sent a keyframe
+// yet has no codec to blame.
+func tileCaption(battery bool, codecs map[string]string) string {
+	for _, c := range codecs {
+		if isHEVC(c) {
+			return "H.265 only: open the camera to play it"
+		}
+	}
+	if battery {
+		return "Battery camera: no live picture while it sleeps"
+	}
+	return "Waiting for video"
 }

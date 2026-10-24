@@ -1,7 +1,9 @@
 package control
 
 import (
+	"encoding/json"
 	"fmt"
+	"html/template"
 	"net"
 	"net/http"
 	"strings"
@@ -24,6 +26,16 @@ type RecorderURLs struct {
 	// one itself: two builders for the same URL drift, and the one an
 	// operator pastes into a recorder must be the one the page shows.
 	StreamHTTP map[string]map[string]string
+	// StreamRTSP is the RTSP output per camera and stream, for the streams
+	// the config serves over RTSP. Empty when RTSP is off.
+	StreamRTSP map[string]map[string]string
+	// FrigateInputs is each camera's Frigate ffmpeg inputs, in Cameras
+	// order, for the snippet and for updating a pasted config.
+	FrigateInputs map[string][]frigateInput
+	Cameras       []string
+	// RTSPHost and RTSPPort are the RTSP listener as a recorder dials it;
+	// RTSPPort is empty when RTSP is off.
+	RTSPHost, RTSPPort string
 }
 
 // httpStreamURL is where the streaming listener serves one stream: main is
@@ -51,7 +63,10 @@ func recorderURLs(cfg *config.Config, host string) RecorderURLs {
 	// with an unbracketed colon-separated address, which nothing parses as
 	// the host and port they are meant to be.
 	httpBase := net.JoinHostPort(host, portOf(cfg.Listen))
-	out := RecorderURLs{StreamHTTP: make(map[string]map[string]string, len(cfg.Cameras))}
+	out := RecorderURLs{StreamHTTP: make(map[string]map[string]string, len(cfg.Cameras)), StreamRTSP: make(map[string]map[string]string), FrigateInputs: map[string][]frigateInput{}, RTSPHost: host}
+	if cfg.RTSP != nil {
+		out.RTSPPort = portOf(cfg.RTSP.Listen)
+	}
 	var frigate strings.Builder
 	frigate.WriteString("cameras:\n")
 
@@ -74,9 +89,17 @@ func recorderURLs(cfg *config.Config, host string) RecorderURLs {
 				detect = httpStreamURL(httpBase, cam.Name, "sub")
 			}
 		}
+		out.Cameras = append(out.Cameras, cam.Name)
+		inputs := []frigateInput{{detect, []string{"detect"}}, {main, []string{"record", "audio"}}}
+		if detect == main {
+			// One stream doing all three: Frigate refuses the same path twice.
+			inputs = []frigateInput{{main, []string{"detect", "record", "audio"}}}
+		}
+		out.FrigateInputs[cam.Name] = inputs
 		fmt.Fprintf(&frigate, "  %s:\n    ffmpeg:\n      inputs:\n", cam.Name)
-		fmt.Fprintf(&frigate, "        - path: %s\n          roles: [detect]\n", detect)
-		fmt.Fprintf(&frigate, "        - path: %s\n          roles: [record, audio]\n", main)
+		for _, in := range inputs {
+			fmt.Fprintf(&frigate, "        - path: %s\n          roles: [%s]\n", in.Path, strings.Join(in.Roles, ", "))
+		}
 
 		if cfg.RTSP != nil {
 			rtspBase := net.JoinHostPort(host, portOf(cfg.RTSP.Listen))
@@ -85,8 +108,12 @@ func recorderURLs(cfg *config.Config, host string) RecorderURLs {
 				if s != "main" {
 					suffix = "_" + s
 				}
-				out.RTSP = append(out.RTSP,
-					fmt.Sprintf("rtsp://%s/%s%s", rtspBase, cam.Name, suffix))
+				u := fmt.Sprintf("rtsp://%s/%s%s", rtspBase, cam.Name, suffix)
+				out.RTSP = append(out.RTSP, u)
+				if out.StreamRTSP[cam.Name] == nil {
+					out.StreamRTSP[cam.Name] = map[string]string{}
+				}
+				out.StreamRTSP[cam.Name][s] = u
 			}
 		}
 	}
@@ -102,10 +129,22 @@ func (s *Server) serveSetup(w http.ResponseWriter, r *http.Request) {
 	// machine is on more than one private network and only the operator
 	// knows which one the cameras are on, so the page asks rather than
 	// picking.
+	auto := autoSweepRanges(r, s.opts.ConfigPath)
+	autoJSON, err := json.Marshal(auto)
+	if err != nil {
+		autoJSON = []byte("[]")
+	}
+	prefill := ""
+	if len(auto) > 0 {
+		prefill = auto[0]
+	} else if ranges := localSweepRanges(); len(ranges) > 0 {
+		prefill = ranges[0]
+	}
 	s.render(w, "setup.html", struct {
-		Title  string
-		Ranges []string
-	}{Title: "Setup", Ranges: sweepRangesFor(r.Host)})
+		Title          string
+		AutoRangesJSON template.JS
+		Prefill        string
+	}{Title: "Setup", AutoRangesJSON: template.JS(autoJSON), Prefill: prefill})
 }
 
 func (s *Server) serveURLs(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +169,53 @@ func (s *Server) serveURLs(w http.ResponseWriter, r *http.Request) {
 	// works from nowhere.
 	page.URLs = recorderURLs(cfg, hostOnly(r.Host))
 	s.render(w, "urls.html", page)
+}
+
+// nvrPage is Settings > Connect to NVR.
+type nvrPage struct {
+	Title string
+	URLs  RecorderURLs
+	Error string
+	// Tab is the recorder shown first.
+	Tab string
+	// Pasted, Merged, Updated, Added and MergeErr are the Frigate config
+	// updater's input and result.
+	Pasted, Merged string
+	Updated, Added []string
+	MergeErr       string
+}
+
+// RTSPPath is a camera stream's path on the RTSP listener, as Blue Iris
+// and similar recorders ask for it.
+func (p nvrPage) RTSPPath(cam, stream string) string {
+	if stream == "main" {
+		return "/" + cam
+	}
+	return "/" + cam + "_" + stream
+}
+
+// serveNVR shows the recorder snippets; a POST runs the Frigate config
+// updater on a pasted config.
+func (s *Server) serveNVR(w http.ResponseWriter, r *http.Request) {
+	page := nvrPage{Title: "Connect to NVR", Tab: "frigate"}
+	cfg, err := config.LoadRaw(s.opts.ConfigPath)
+	if err != nil {
+		page.Error = err.Error()
+		s.render(w, "nvr.html", page)
+		return
+	}
+	page.URLs = recorderURLs(cfg, hostOnly(r.Host))
+	if r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		page.Pasted = r.FormValue("frigate")
+		out, updated, added, err := mergeFrigate([]byte(page.Pasted), page.URLs.FrigateInputs, page.URLs.Cameras)
+		if err != nil {
+			page.MergeErr = err.Error()
+		} else {
+			page.Merged, page.Updated, page.Added = string(out), updated, added
+		}
+	}
+	s.render(w, "nvr.html", page)
 }
 
 // hostOnly strips the port from a Host header, which carries one whenever

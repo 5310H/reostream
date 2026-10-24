@@ -12,23 +12,24 @@
 <body>
 <div class="sidebar">
 <p class="brand">reostream <span class="version">{{version}}</span></p>
+{{/* Signing in and claiming come before anything the rail links to. */}}
+{{if not (or (eq .Title "Sign in") (eq .Title "Claim this install"))}}
+<button type="button" class="find" id="find-open"><span>Find a setting&hellip;</span><kbd>&#8984;K</kbd></button>
 <nav>
 <ul>
-<li><a href="/">Status</a></li>
+<li><a href="/">Fleet</a></li>
+<li><a href="/wall">Wall</a></li>
 <li><a href="/logs">Logs</a></li>
-<li><a href="/config">Config</a></li>
-<li><a href="/password">Password</a></li>
-<li><a href="/setup">Setup</a></li>
+<li><a href="/settings" data-also="/password /config /settings/ /cameras$">Settings</a></li>
 </ul>
 <h2>Cameras</h2>
 <ul class="cameras">
-<li><a href="/cameras">All cameras</a></li>
 {{range fleet}}
 <li><a href="/cameras/{{.Name}}"><span class="dot state-{{.State}}" style="background:currentColor"></span>{{.Name}}</a></li>
 {{end}}
 </ul>
 </nav>
-<p class="hint">Press <kbd>&#8984;K</kbd> for anything</p>
+{{end}}
 </div>
 <main>
 {{template "body" .}}
@@ -42,11 +43,78 @@
   var best = null;
   for (var i = 0; i < links.length; i++) {
     var href = links[i].getAttribute('href');
-    if (path === href || (href !== '/' && path.indexOf(href) === 0)) {
+    var also = (links[i].dataset.also || '').split(' ').some(function (p) {
+      if (!p) return false;
+      if (p.slice(-1) === '$') return path === p.slice(0, -1);
+      return path.indexOf(p) === 0;
+    });
+    if (also || path === href || (href !== '/' && path.indexOf(href) === 0)) {
       if (!best || href.length > best.getAttribute('href').length) best = links[i];
     }
   }
   if (best) best.setAttribute('aria-current', 'page');
+})();
+</script>
+<div class="palette" id="palette" hidden>
+<div class="palette-box" role="dialog" aria-label="Find a setting">
+<input type="search" id="palette-q" placeholder="Find a setting or page" autocomplete="off" spellcheck="false">
+<ul id="palette-list" role="listbox"></ul>
+</div>
+</div>
+<script>
+// "Find a setting": Cmd/Ctrl+K or the box in the rail. Every page, every
+// camera's sections and every setting, matched on all typed words.
+(function () {
+  var items = {{paletteIndex}};
+  var pal = document.getElementById('palette'), q = document.getElementById('palette-q'),
+      list = document.getElementById('palette-list'), sel = 0, shown = [];
+  function render() {
+    var words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    shown = items.filter(function (it) {
+      var hay = (it.l + ' ' + it.w).toLowerCase();
+      return words.every(function (w) { return hay.indexOf(w) >= 0; });
+    }).slice(0, 40);
+    sel = Math.min(sel, Math.max(shown.length - 1, 0));
+    list.innerHTML = '';
+    shown.forEach(function (it, i) {
+      var li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      if (i === sel) li.setAttribute('aria-selected', 'true');
+      var a = document.createElement('span'); a.className = 'pl'; a.textContent = it.l;
+      var b = document.createElement('span'); b.className = 'pw'; b.textContent = it.w;
+      li.appendChild(a); li.appendChild(b);
+      li.addEventListener('click', function () { location.href = it.h; });
+      list.appendChild(li);
+    });
+    if (!shown.length) { var li = document.createElement('li'); li.className = 'none'; li.textContent = 'Nothing matches'; list.appendChild(li); }
+  }
+  function open() { pal.hidden = false; q.value = ''; sel = 0; render(); q.focus(); }
+  function close() { pal.hidden = true; }
+  var findOpen = document.getElementById('find-open');
+  if (findOpen) findOpen.addEventListener('click', open);
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); pal.hidden ? open() : close(); return; }
+    if (pal.hidden) return;
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, shown.length - 1); render(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === 'Enter' && shown[sel]) location.href = shown[sel].h;
+  });
+  q.addEventListener('input', function () { sel = 0; render(); });
+  pal.addEventListener('click', function (e) { if (e.target === pal) close(); });
+  if (!/Mac|iPhone|iPad/.test(navigator.platform)) document.querySelectorAll('.find kbd').forEach(function (k) { k.textContent = 'Ctrl K'; });
+
+  // The "i" after a setting: hover shows it on a desktop, a tap toggles it.
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.info');
+    document.querySelectorAll('.info[aria-expanded="true"]').forEach(function (o) { if (o !== b) o.setAttribute('aria-expanded', 'false'); });
+    if (b) b.setAttribute('aria-expanded', b.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+  });
+  // A link to one setting lands on it and marks it briefly.
+  if (location.hash.indexOf('#row-') === 0) {
+    var row = document.getElementById(location.hash.slice(1));
+    if (row) { row.classList.add('found'); setTimeout(function () { row.classList.remove('found'); }, 2000); }
+  }
 })();
 </script>
 </body>

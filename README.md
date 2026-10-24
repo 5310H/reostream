@@ -32,17 +32,22 @@ January 2025. reostream is a new implementation, not a fork.
 
 ```
 docker run -d --name reostream --restart unless-stopped \
+  --network host \
   -v reostream-data:/data \
-  -p 8560:8560 -p 8561:8561 -p 8562:8562 \
   ghcr.io/volttech21/reostream:latest
 
 docker logs reostream
 ```
 
+Host networking lets reostream see your real network: it finds cameras on its own
+(battery ones too), and cameras can upload clips to it. Where you can't use it, map the
+ports instead: `-p 8560:8560 -p 8561:8561 -p 8562:8562 -p 2121-2131:2121-2131`.
+
 1. The log prints a one-time token. Open `http://<host>:8562/claim` and paste it.
 2. Keep the password it gives you.
-3. Add a camera: its IP, `admin`, and its password. Port 9000 on the camera must be
-   reachable; it is on by default.
+3. Add cameras: the page searches your network and lists what it finds. Enter a password
+   for each one you want. Port 9000 on a wired camera must be reachable; it is on by
+   default.
 
 Your streams are at `rtsp://<host>:8561/<camera>` and `http://<host>:8560/<camera>.ts`.
 
@@ -94,6 +99,7 @@ Also on port 8560:
 |---|---|
 | `/<cam>.keyframe` | latest keyframe, raw |
 | `/<cam>.frames` | raw access units with a small header, for your own decoder; see `docs/setup.md` |
+| `/<cam>.still.ts` | the latest keyframe as a one-frame MPEG-TS; never touches the camera |
 | `/api/status` | per-stream JSON: connected, fps, bitrate, clients, reconnects, last error |
 | `/metrics` | the same for Prometheus |
 
@@ -104,6 +110,12 @@ Also on port 8560:
 - A slow client is disconnected, never buffered. No client can stall a camera.
 - New clients start at a keyframe. Audio is carried when the camera sends it.
 - Two-way audio: on cameras with a speaker, Frigate's talk button works through it.
+- The camera's own detections (motion, person, vehicle, animal) go to MQTT and to Frigate
+  as events, so a small box can lean on the camera instead of decoding everything.
+- Recordings from the camera's SD card, and a small FTP receiver that keeps a copy of each
+  clip the camera uploads.
+- Battery cameras: found by their own UDP search, woken only while someone is watching,
+  battery level shown without waking them.
 - Sessions are closed cleanly. A camera left with an open session refuses connections
   for minutes.
 - A web page on port 8562 for status, live view, config, logs and camera settings.
@@ -117,21 +129,28 @@ No ffmpeg, GStreamer or RTSP server in the serving path.
 | RLC-810A (8 MP bullet) | 6 | v3.1.0.956_24022103 |
 | FE-P (fisheye) | 1 | v3.0.0.5336_2509021915 |
 | Duo 3 PoE (dual lens panorama) | 1 | v3.0.0.5049_2506302188 |
+| TrackMix PoE (PTZ, auto tracking) | 1 | v3.2.0.5931_2601294931 |
+| Argus PT Ultra (battery, Wi-Fi) | 1 | v3.0.0.5808_26041006 |
 
 reostream has been the only video path for this fleet's Frigate since September: 23
 streams, 69 Mbps, about 60% of one CPU core, 29-59 MB of memory. Numbers in
 `docs/measurements.md`.
 
-Not yet tested:
-
-- **Battery cameras.** They sleep and wake, and the protocol client has not seen them yet.
-  Reports welcome.
-- Other models and firmware.
+Not yet tested: other models and firmware. Reports welcome.
 
 ## Camera control
 
-The web page has a settings page for each camera: image, overlay, IR, status LED,
-floodlight, time and accounts.
+Each camera has a page with three tabs:
+
+- **Live:** the player, stream picker, pan/tilt with presets, talk, snapshot, floodlight,
+  and every stream URL to copy.
+- **Recordings:** clips from the SD card on a timeline, plus clips saved by reostream.
+- **Settings:** image, name and timestamp, encoding, lights, audio, pan/tilt (auto return,
+  auto tracking), FTP, email and push alerts, network services, date and time, and every
+  raw value for anything not covered. Instant settings save as you change them; ones that
+  restart the stream or the camera ask first. A blue dot marks a setting changed from the
+  camera's factory value, with a button to put it back. Settings can be copied to other
+  cameras.
 
 ![Camera page](docs/images/camera.png)
 
@@ -147,7 +166,8 @@ and writing settings and what to watch out for.
 
 ## More
 
-- `docs/setup.md`: other ways to run it, the config file, the control page, RTSP, the frames feed
+- `docs/setup.md`: other ways to run it, the config file, the control page, RTSP, the frames feed,
+  recordings and saved clips, alerts, battery cameras
 - `docs/control.md`: camera control with `reocam`
 - `docs/protocol.md`: what the Baichuan wire actually does
 - `docs/measurements.md`: how every number above was measured

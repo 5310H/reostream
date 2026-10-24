@@ -233,53 +233,43 @@ func (s *Server) settleClaim() bool {
 // claimPasswordMinLength is the shortest password the claim screen accepts,
 // in characters.
 //
-// This is the ONLY control on the login now, so the arithmetic below is
-// the whole security argument and is worth reading before changing the
-// number. The private-address gate that used to stand in front of this
-// page is gone -- it refused the operator over a tailnet and admitted
-// strangers behind any L4 hop. The login throttle that replaced it is gone
-// too, because behind docker-proxy a source-keyed limit cannot tell the
-// attacker from the operator; serveLogin records the four designs that
-// were measured and how each one failed.
+// It was 16. It is 12 because the cost of a guess changed, not because the
+// requirement was softened: see loginKDFIterations in internal/webui. The
+// login used to compare a single SHA-256, which is free, and the measured
+// worst case was ~8,400 guesses a second. A check now costs ~166ms of a
+// core, so an attacker saturating every core on this machine gets roughly
+// 50 a second.
 //
-// The rate to size against is therefore the fastest one measured with no
-// limit in the way: ~8,400 password comparisons a second sustained from
-// one source, which is what the harness got out of the last two designs
-// and is bounded only by the HTTP server. That is 7.3e8 guesses a day and
-// 2.65e11 a year. Halving for the expected search, a password must be
-// worth about 2^39 to survive a year at that rate.
+// The arithmetic that sets the floor, redone against that:
 //
-// Against it:
-//
+//   - 50 guesses a second is 1.6e9 a year. Halving for the expected search,
+//     a password must be worth about 2^32 to survive a year. It was 2^39.
 //   - The GENERATED password this screen offers first is 16 characters of
-//     crypto/rand from a 31-character alphabet: 79.3 bits, 7.7e23. Half of
-//     that at 8,400/s is 4.6e11 years. Safe by a margin no rate limit
-//     could have bought, which is the point of offering it first.
+//     crypto/rand from a 31-character alphabet: 79.3 bits. Unchanged, still
+//     safe by a margin nothing else here could buy, still offered first.
 //   - Three words a person will remember is about 2^33 from an everyday
-//     vocabulary: 8.6 billion, half of it 4.3 billion, which at 8,400/s
-//     falls in about six DAYS. That is why this screen no longer
-//     recommends three words, and why the floor moved off the number that
-//     was derived from a throttled rate.
-//   - Four such words is about 2^44, which is roughly 33 years. Sixteen
-//     characters is about what four words costs to type, which is where
-//     the floor comes from.
+//     vocabulary. Under the old rate that fell in six DAYS, which is why
+//     the floor was 16 and why this screen stopped recommending it. At 50 a
+//     second the same three words last about five years.
+//   - Twelve characters a person invents is in that same neighbourhood,
+//     which is where the new floor comes from.
 //
-// Be honest about what a length rule does and does not buy: sixteen
+// Be honest about what a length rule does and does not buy: twelve
 // characters a person invents is not 79 bits, and nothing here measures
-// entropy. The floor pushes a hand-chosen password past 2^39 in the
-// typical case; the generated default is the only thing that guarantees
-// it. That is the whole reason the field arrives already filled in.
+// entropy. The floor pushes a hand-chosen password past 2^32 in the typical
+// case; the generated default is the only thing that guarantees it. That is
+// still the reason the field arrives already filled in.
 //
-// And this is a default, not an invariant. It applies at claim time only:
-// a password written by hand into config.toml, or changed later through
-// the Config page, is never checked against it.
+// And this is a default, not an invariant. It applies at claim time and on
+// the password page; a password written by hand into config.toml is never
+// checked against it.
 //
 // Length only: no complexity classes, no strength meter, no dictionary of
 // common passwords. This is the first screen a person who does not code
 // ever sees, and a rule they satisfy by accepting the password already in
 // the box is worth more than one they satisfy by adding "1!" to something
 // short.
-const claimPasswordMinLength = 16
+const claimPasswordMinLength = 12
 
 // validClaimPassword checks a submitted password for the two things that
 // would make it unusable in the file it is about to be written into, for

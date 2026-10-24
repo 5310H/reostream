@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +23,33 @@ import (
 type cameraPage struct {
 	Title  string
 	Camera Camera
+
+	// Head is the camera shell (camshell.go); Cat is the settings
+	// category this page shows, empty on the Live tab.
+	Head camHead
+	Cat  string
+
+	// Streams feeds the Live tab's stream picker.
+	Streams []liveStream
+	// Battery is a camera that sleeps; its Live tab wakes it while open.
+	Battery bool
+	// CopyURLs is the Live tab's Copy URL list.
+	CopyURLs []copyURL
+	// Dewarp is true for a fisheye, whose Live tab links the browser dewarp.
+	Dewarp bool
+
+	// Clips is the Auto-save motion clips section.
+	Clips clipsView
+
+	// PTZ is the Live tab's presets and the Pan, tilt, zoom settings.
+	PTZ   ptzView
+	Track autoTrackView
+
+	// NetPort is the Network services section.
+	NetPort netPortView
+
+	// CGIErr is a failure opening the CGI session a category reads over.
+	CGIErr string
 
 	// Defaults is the camera's own factory value for a field, keyed by the
 	// field's primary XPath, where the camera reported one. See defaults.go.
@@ -102,6 +131,31 @@ type cameraPage struct {
 	// carries, repeated here because the floodlight form lives outside
 	// Groups and so cannot read it off a Group.
 	FloodlightConfirm string
+	// HasStitch is the Support block's binoCfg: the camera has two lenses
+	// and a seam between them. Measured as the exact inverse of fishEye on
+	// this fleet, which is the physical fact -- one lens has no seam, two
+	// lenses have nothing to dewarp.
+	//
+	// Treated like the fisheye rather than the floodlight: false when the
+	// support read failed, because a stitch control on a single-lens camera
+	// offers to move a seam that does not exist.
+	HasStitch bool
+	Stitch    stitchPage
+	StitchErr string
+
+	// Encoding is what the camera records at, read over CGI like the
+	// floodlight rather than from a Baichuan block. The block (56) carries
+	// a range for the interframe space only, so a form built from it would
+	// offer free number boxes for bitrate and frame rate and discover what
+	// the camera refuses by being refused; GetEnc answers that properly,
+	// per resolution. See encoding.go.
+	Encoding encodingPage
+
+	// Siren is the camera's own noise: speaker volume, and whether it makes
+	// a sound when it sees something. Read on the same CGI session. Two
+	// controls rather than the eleven the message table suggests, because
+	// two is what this firmware answers -- see internal/cgi/audio.go.
+	Siren sirenPage
 }
 
 // SupportedCount, WantsParamsCount, AbsentCount and HungUpCount give
@@ -179,6 +233,9 @@ type positionOption struct {
 	Label    string
 	Value    string
 	Selected bool
+	// Taken names the other overlay already in this corner (the camera
+	// cannot draw two there), so the corner is offered greyed out.
+	Taken string
 }
 
 // positionView is one overlay-position control, ready to render.
@@ -207,16 +264,28 @@ func (p cameraPage) Position(f Field) positionView {
 	x := p.Values[f.XPath]
 	y := p.Values[f.YPath]
 
+	// The name and the timestamp cannot share a corner: the corner the
+	// other one is in, while it is shown, is not offered.
+	other, otherShown, otherLabel := "OsdDatetime", "OsdDatetime/enable", "the timestamp"
+	if strings.HasPrefix(f.XPath, "OsdDatetime/") {
+		other, otherShown, otherLabel = "OsdChannelName", "OsdChannelName/enable", "the camera name"
+	}
+	ox, oy := p.Values[other+"/topLeftX"], p.Values[other+"/topLeftY"]
+
 	view := positionView{}
 	known := false
 	for _, c := range osdCorners() {
 		selected := c.X == x && c.Y == y
 		known = known || selected
-		view.Options = append(view.Options, positionOption{
+		opt := positionOption{
 			Label:    c.Label,
 			Value:    c.X + "," + c.Y,
 			Selected: selected,
-		})
+		}
+		if !selected && p.Values[otherShown] != "0" && c.X == ox && c.Y == oy {
+			opt.Taken = otherLabel
+		}
+		view.Options = append(view.Options, opt)
 	}
 	switch {
 	case x == "" && y == "":
@@ -241,36 +310,161 @@ func (s *Server) cameraGroupFor(name string) cameraGroup {
 	return cameraGroup{Camera: name}
 }
 
-// serveCamera shows one camera: its stream state and video, its own
-// account of its hardware and permissions, the probe of every config
-// message this program knows (the only honest answer to what a model
-// implements), and then the curated settings a person actually changes.
+// liveStream is one stream on the Live tab's picker. A stream this browser
+// cannot decode (HEVC) is listed struck through, with the reason, because
+// the recorder still gets it.
+type liveStream struct {
+	Name     string
+	Codec    string
+	URL      string // same-origin player URL
+	Playable bool
+	FPS      float64
+	Mbps     string
+}
+
+// catGroups maps a settings category to the curated groups it shows.
+var catGroups = map[string][]string{
+	"image":   {"Image"},
+	"overlay": {"Name and timestamp"},
+	"lights":  {"Lights"},
+	"ftp":     {"FTP upload", "FTP server"},
+	"email":   {"Email alerts", "Email server"},
+	"push":    {"Push notifications"},
+}
+
+// serveCamera is the Live tab: the player, the stream picker and the
+// quick actions. It reads nothing from the camera beyond the shell's
+// (cached) identity; the video comes from the hub reostream already holds.
 func (s *Server) serveCamera(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	cam, err := s.byName(name)
+	cam, err := s.byName(r.PathValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-
 	page := cameraPage{
-		Title:  cam.Name,
-		Camera: cam,
-		Flash:  s.takeFlash(r),
-		Group:  s.cameraGroupFor(cam.Name),
-		// The same URLs the status page copies out, built from the host
-		// this page was reached on so both pages show the one an operator
-		// can actually paste. A config that will not load leaves them
-		// empty rather than stopping the page.
-		StreamURLs: func() map[string]string {
-			cfg, err := config.Load(s.opts.ConfigPath)
-			if err != nil {
-				return nil
+		Title:      cam.Name,
+		Camera:     cam,
+		Flash:      s.takeFlash(r),
+		Group:      s.cameraGroupFor(cam.Name),
+		StreamURLs: s.streamURLsFor(r, cam),
+	}
+	page.Head = s.camHeadFor(r.Context(), cam, "live", "")
+	page.CopyURLs = s.copyURLsFor(r, cam)
+	page.Support = s.identFor(r.Context(), cam).Support
+	page.Dewarp = page.Support != nil && page.Support.HasFishEye(0)
+	// The floodlight quick action, only on a camera that says it has one.
+	if page.Support != nil && page.Support.HasFloodlight(0) {
+		if c, err := s.cgiDial(cam); err == nil {
+			ctx, cancel := context.WithTimeout(r.Context(), readTimeout*2)
+			if mode, state, err := readFloodlight(ctx, c); err == nil {
+				page.HasFloodlight = true
+				page.FloodlightCurrent = floodlightState(mode, state)
 			}
-			return recorderURLs(cfg, hostOnly(r.Host)).StreamHTTP[cam.Name]
-		}(),
+			cancel()
+			c.Close()
+		}
+	}
+	if page.Support != nil && page.Support.HasPTZ() {
+		ctx, cancel := context.WithTimeout(r.Context(), readTimeout*2)
+		page.PTZ = s.readPresets(ctx, cam)
+		cancel()
+	}
 
-		Groups:            groups(),
+	codecs := s.codecsByCamera()[cam.Name]
+	suffix := map[string]string{"main": "_main", "sub": "_sub", "extern": "_extern", "zoom": "_zoom"}
+	page.Battery = s.onDemand(cam.Name)
+	base := s.opts.StreamBase
+	if page.Battery {
+		// The public listener refuses a battery camera's stream.
+		base = ""
+	}
+	for _, row := range page.Group.Rows {
+		name := streamOf(row.Name)
+		codec := codecs[name]
+		if codec == "" && page.Battery {
+			// Asleep since reostream started, so no keyframe to read the
+			// codec from. What battery cameras send: H.264 sub, H.265 main
+			// (read off an Argus PT Ultra).
+			codec = map[string]string{"sub": "H264", "main": "H265"}[name]
+		}
+		// H.265 is offered too: whether this browser decodes it is decided
+		// in the browser (live.js), not guessed here.
+		ls := liveStream{Name: name, Codec: codec, Playable: browserPlayable(codec) || isHEVC(codec),
+			FPS: row.FPS, Mbps: row.MbpsBitrate()}
+		if sfx, ok := suffix[name]; ok {
+			ls.URL = tileURL(base, "/"+cam.Name+sfx+".ts")
+			if name == "main" {
+				ls.URL = tileURL(base, "/"+cam.Name+".ts")
+			}
+		}
+		page.Streams = append(page.Streams, ls)
+	}
+	// The default stream is picked in the browser (live.js): the sharpest
+	// one it can decode, or the one last chosen for this camera.
+	s.render(w, "camera.html", page)
+}
+
+// copyURL is one line of the Live tab's Copy URL list.
+type copyURL struct{ Label, URL string }
+
+// copyURLsFor lists every address a recorder can read this camera from,
+// HTTP then RTSP, per stream in main/sub/extern order, each once.
+func (s *Server) copyURLsFor(r *http.Request, cam Camera) []copyURL {
+	cfg, err := config.Load(s.opts.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	u := recorderURLs(cfg, hostOnly(r.Host))
+	var out []copyURL
+	seen := map[string]bool{}
+	add := func(label, url string) {
+		if url != "" && !seen[url] {
+			seen[url] = true
+			out = append(out, copyURL{label, url})
+		}
+	}
+	for _, st := range []string{"main", "sub", "extern"} {
+		add(st+" · HTTP", u.StreamHTTP[cam.Name][st])
+	}
+	for _, st := range []string{"main", "sub", "extern"} {
+		add(st+" · RTSP", u.StreamRTSP[cam.Name][st])
+	}
+	return out
+}
+
+// streamURLsFor is this camera's streams to their recorder URLs, built from
+// the host the page was reached on so the URL shown is one that can be
+// pasted. A config that will not load leaves them empty.
+func (s *Server) streamURLsFor(r *http.Request, cam Camera) map[string]string {
+	cfg, err := config.Load(s.opts.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	return recorderURLs(cfg, hostOnly(r.Host)).StreamHTTP[cam.Name]
+}
+
+// serveCameraSettingsIndex sends the bare Settings tab to its first
+// category.
+func (s *Server) serveCameraSettingsIndex(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/cameras/"+url.PathEscape(r.PathValue("name"))+"/settings/image", http.StatusSeeOther)
+}
+
+// serveCameraSettings is one category of the Settings tab. Only what that
+// category shows is read from the camera: one Baichuan block for a curated
+// group, or one CGI session for the controls that live there.
+func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
+	cam, err := s.byName(r.PathValue("name"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	cat := r.PathValue("cat")
+	page := cameraPage{
+		Title:             cam.Name,
+		Camera:            cam,
+		Flash:             s.takeFlash(r),
+		Group:             s.cameraGroupFor(cam.Name),
+		StreamURLs:        s.streamURLsFor(r, cam),
 		Values:            map[string]string{},
 		Unavailable:       map[string]string{},
 		ResolvedBlock:     map[string]string{},
@@ -279,137 +473,152 @@ func (s *Server) serveCamera(w http.ResponseWriter, r *http.Request) {
 		FloodlightOptions: floodlightOptions,
 		FloodlightConfirm: lightsConfirmReason,
 	}
+	page.Head = s.camHeadFor(r.Context(), cam, "settings", cat)
+	if page.Head.CatLabel == "" {
+		http.NotFound(w, r)
+		return
+	}
+	page.Title = cam.Name + " · " + page.Head.CatLabel
+	page.Cat = cat
+	page.Support = s.identFor(r.Context(), cam).Support
 
-	// Each phase below gets its own fresh probeTimeout budget rather than
-	// sharing one ctx across all four: this page merges four reads that
-	// used to be four separate requests (the camera overview, the block
-	// probe, the curated settings, the floodlight), each with its own full
-	// probeTimeout window. probeCamera alone can spend the whole of a
-	// shared budget churning through baichuan.ConfigNames' hundred-odd
-	// reads on a camera that answers none of them, which would starve
-	// every phase after it of any time at all, not just make it slower.
+	for _, g := range groups() {
+		if slices.Contains(catGroups[cat], g.Title) {
+			page.Groups = append(page.Groups, g)
+		}
+	}
 
-	supportCtx, supportCancel := context.WithTimeout(r.Context(), probeTimeout)
-	defer supportCancel()
-	if conn, err := s.dial(supportCtx, cam); err != nil {
-		page.Err = fmt.Sprintf("could not connect: %v", err)
-	} else {
-		// Deferred rather than closed inline after the two reads below: an
-		// early return added between the dial and a later close is exactly
-		// how the connection-leak bug elsewhere in this package happened,
-		// and conn is never reassigned here the way writeBlock's and
-		// probeCamera's own conn are, so nothing here needs the
-		// closure-over-a-variable pattern those two use.
-		defer conn.Close()
-
-		if sup, err := baichuan.GetSupport(supportCtx, conn); err == nil {
-			page.Support = &sup
+	if len(page.Groups) > 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		defer cancel()
+		if conn, err := s.dial(ctx, cam); err != nil {
+			page.SettingsErr = fmt.Sprintf("could not connect: %v", err)
 		} else {
-			page.Err = fmt.Sprintf("support read failed: %v", err)
-		}
-		if ab, err := baichuan.GetAbilities(supportCtx, conn); err == nil {
-			page.Abilities = ab
-		} else if page.Err == "" {
-			page.Err = fmt.Sprintf("abilities read failed: %v", err)
+			defer conn.Close()
+			s.readGroups(ctx, conn, &page)
 		}
 	}
 
-	// probeCamera carries its own cameraProbeTimeout (3 minutes) for a
-	// sweep of every known message, but this page still bounds the call at
-	// probeTimeout, exactly as the standalone camera overview page it
-	// replaced did: a camera that answers nothing at all must fail this
-	// phase in the same 40 seconds it always has, not eat the full three
-	// minutes just because the call no longer has a page of its own.
-	probeCtx, probeCancel := context.WithTimeout(r.Context(), probeTimeout)
-	defer probeCancel()
-	probes, err := s.probeCamera(probeCtx, cam)
-	page.Probes = probes
-	if err != nil && page.Err == "" {
-		page.Err = err.Error()
+	if cat == "clips" {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		page.Clips = s.readClipsView(ctx, cam, hostOnly(r.Host))
+		cancel()
+	}
+	if cat == "ptz" {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		page.PTZ = s.readGuard(ctx, cam)
+		cancel()
+		ctx, cancel = context.WithTimeout(r.Context(), probeTimeout)
+		page.Track = s.readAutoTrackView(ctx, cam)
+		cancel()
+	}
+	if cat == "network" {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		page.NetPort = s.readNetPort(ctx, cam)
+		cancel()
 	}
 
-	// The curated settings read is its own dial, independent of the one
-	// above: resolveGroupBlock reads each group's block fresh, and a
-	// failure here must not blank out the support/abilities/probe section
-	// already filled in.
-	settingsCtx, settingsCancel := context.WithTimeout(r.Context(), probeTimeout)
-	defer settingsCancel()
-	if conn, err := s.dial(settingsCtx, cam); err != nil {
-		page.SettingsErr = fmt.Sprintf("could not connect: %v", err)
-	} else {
-		defer conn.Close()
-		for _, g := range page.Groups {
-			pair, doc, failReason := resolveGroupBlock(settingsCtx, conn, g)
-			if failReason != "" {
-				for _, f := range g.Fields {
-					if f.Kind != "warning" {
-						page.Unavailable[f.XPath] = failReason
+	// The CGI-side controls, each only on the category that shows it.
+	needCGI := map[string]bool{"streams": true, "view": true, "stitch": true, "lights": true, "audio": true}[cat]
+	if needCGI {
+		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		defer cancel()
+		c, cgiErr := s.cgiDial(cam)
+		if cgiErr != nil {
+			page.CGIErr = fmt.Sprintf("could not connect: %v", cgiErr)
+		} else {
+			defer c.Close()
+			switch cat {
+			case "streams":
+				if enc, encErr := readEncoding(ctx, c); encErr != nil {
+					page.Encoding.Err = fmt.Sprintf("could not read the encoding: %v", encErr)
+				} else {
+					page.Encoding = enc
+				}
+			case "view":
+				page.HasFishEye = page.Support != nil && page.Support.HasFishEye(0)
+				if page.HasFishEye {
+					if fe, err := readFisheye(ctx, c); err != nil {
+						page.FishEyeErr = fmt.Sprintf("could not read the view mode: %v", err)
+					} else {
+						page.FishEyeCurrent = fisheyeValueByMode(int(fe.ImageType))
 					}
 				}
-				continue
-			}
-			page.ResolvedBlock[g.Title] = pair.Name
-			for _, f := range g.Fields {
-				if f.Kind == "warning" {
-					continue
-				}
-				// Every element the field edits, not just its primary one:
-				// a position control is only seedable, and only writable,
-				// when BOTH of its elements resolved. A missing half is
-				// recorded against the field's primary path as well, which
-				// is the key the template asks about, so the control is
-				// replaced by the explanation rather than rendered half
-				// blank.
-				for _, path := range f.Paths() {
-					if v, ok := fieldValue(doc, path); ok {
-						page.Values[path] = v
-						continue
+			case "stitch":
+				page.HasStitch = page.Support != nil && page.Support.HasStitch(0)
+				if page.HasStitch {
+					if st, err := readStitch(ctx, c); err != nil {
+						page.StitchErr = fmt.Sprintf("could not read the lens alignment: %v", err)
+					} else {
+						page.Stitch = st
 					}
-					reason := fmt.Sprintf("%s does not appear in %s on this camera", path, pair.Name)
-					page.Unavailable[path] = reason
-					page.Unavailable[f.XPath] = reason
+				}
+			case "lights":
+				// Hidden only on a positive no; see HasFloodlight.
+				page.HasFloodlight = page.Support == nil || page.Support.HasFloodlight(0)
+				if page.HasFloodlight {
+					if mode, state, readErr := readFloodlight(ctx, c); readErr != nil {
+						page.FloodlightErr = fmt.Sprintf("could not read the floodlight: %v", readErr)
+					} else {
+						page.FloodlightCurrent = floodlightState(mode, state)
+					}
+				}
+			case "audio":
+				page.Siren = readSiren(ctx, c)
+				if enc, err := readEncoding(ctx, c); err == nil {
+					page.Encoding = enc
 				}
 			}
-		}
-	}
-
-	// The floodlight is CGI only, an entirely separate transport and
-	// session from the Baichuan conns dialed above, so a failure reading
-	// it must not blank out either Baichuan section: it is reported on
-	// its own, in FloodlightErr.
-	floodlightCtx, floodlightCancel := context.WithTimeout(r.Context(), probeTimeout)
-	defer floodlightCancel()
-	if c, cgiErr := s.cgiDial(cam); cgiErr != nil {
-		page.FloodlightErr = fmt.Sprintf("could not connect for the floodlight: %v", cgiErr)
-	} else {
-		// Channel 0: this page is one camera, and every read on it is
-		// against that camera's first channel.
-		// Hidden only on a positive no. A camera that says it has no light
-		// gets no control; a camera whose support read failed is unknown,
-		// and hiding a light someone needs to switch on a guess is worse
-		// than offering one that may do nothing.
-		page.HasFishEye = page.Support != nil && page.Support.HasFishEye(0)
-		if page.HasFishEye {
-			if fe, err := readFisheye(floodlightCtx, c); err != nil {
-				page.FishEyeErr = fmt.Sprintf("could not read the view mode: %v", err)
-			} else {
-				page.FishEyeCurrent = fisheyeValueByMode(int(fe.ImageType))
+			if len(page.Groups) > 0 {
+				page.Defaults = readDefaults(ctx, c)
 			}
 		}
-		page.HasFloodlight = page.Support == nil || page.Support.HasFloodlight(0)
-		if page.HasFloodlight {
-			if mode, state, readErr := readFloodlight(floodlightCtx, c); readErr != nil {
-				page.FloodlightErr = fmt.Sprintf("could not read the floodlight: %v", readErr)
-			} else {
-				page.FloodlightCurrent = floodlightState(mode, state)
-			}
+	} else if len(page.Groups) > 0 {
+		// The factory values for the reset buttons come over CGI too.
+		if c, err := s.cgiDial(cam); err == nil {
+			ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+			page.Defaults = readDefaults(ctx, c)
+			cancel()
+			c.Close()
 		}
-		// Same session: the camera's own factory defaults, for the reset
-		// buttons. Best effort; a camera that will not say offers none.
-		page.Defaults = readDefaults(floodlightCtx, c)
 	}
 
 	s.render(w, "camera.html", page)
+}
+
+// readGroups seeds every curated group on the page from the camera, the
+// way the single long camera page used to: a field whose block or element
+// is missing is recorded as unavailable, with the reason, rather than
+// drawn as a blank control.
+func (s *Server) readGroups(ctx context.Context, conn *baichuan.Conn, page *cameraPage) {
+	for _, g := range page.Groups {
+		pair, doc, failReason := resolveGroupBlock(ctx, conn, g)
+		if failReason != "" {
+			for _, f := range g.Fields {
+				if f.Kind != "warning" {
+					page.Unavailable[f.XPath] = failReason
+				}
+			}
+			continue
+		}
+		page.ResolvedBlock[g.Title] = pair.Name
+		for _, f := range g.Fields {
+			if f.Kind == "warning" {
+				continue
+			}
+			// Every element the field edits: a position control is only
+			// seedable, and writable, when BOTH of its elements resolved.
+			for _, path := range f.Paths() {
+				if v, ok := fieldValue(doc, path); ok {
+					page.Values[path] = v
+					continue
+				}
+				reason := fmt.Sprintf("%s does not appear in %s on this camera", path, pair.Name)
+				page.Unavailable[path] = reason
+				page.Unavailable[f.XPath] = reason
+			}
+		}
+	}
 }
 
 // choiceView is a Kind "choice" field's stops, with the camera's own value
@@ -469,4 +678,9 @@ func (p cameraPage) ResetLabel(f Field, def string) string {
 		return "off"
 	}
 	return def
+}
+
+// isHEVC reports an H.265 stream, which some browsers decode and some do not.
+func isHEVC(codec string) bool {
+	return strings.EqualFold(codec, "H265") || strings.EqualFold(codec, "HEVC")
 }

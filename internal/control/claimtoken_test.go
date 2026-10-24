@@ -1,6 +1,7 @@
 package control
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -156,31 +157,45 @@ func TestTheClaimTokenIsSingleUse(t *testing.T) {
 	}
 }
 
-// The password is the ONLY control on the login now: there is no network
-// gate in front of this page and no rate limit behind it, because behind
-// docker-proxy a source-keyed limit cannot tell the attacker from the
-// operator (see serveLogin). So a short password is refused, and the
-// refusal states the rule rather than judging what was typed.
+// The password and the cost of checking it are the only controls on the
+// login: there is no network gate in front of this page and no rate limit
+// behind it, because behind docker-proxy a source-keyed limit cannot tell
+// the attacker from the operator (see serveLogin). What bounds guessing is
+// webui.loginKDFIterations, and the floor here is the arithmetic written
+// against it. So a short password is refused, and the refusal states the
+// rule rather than judging what was typed.
+//
+// The lengths are built from the constant rather than written out: this
+// test asserted 16 in three places and had to be edited when the floor
+// moved, which teaches nothing and hides what the test is actually for.
 func TestAShortClaimPasswordIsRefused(t *testing.T) {
-	const want = "a password needs at least 16 characters. Any 16 will do -- the one already in the box is long enough, and you can use it exactly as it is."
+	want := fmt.Sprintf("a password needs at least %d characters. Any %d will do -- "+
+		"the one already in the box is long enough, and you can use it exactly as it is.",
+		claimPasswordMinLength, claimPasswordMinLength)
 
 	if err := validClaimPassword("hunter2"); err == nil || err.Error() != want {
 		t.Fatalf("validClaimPassword(short) = %v, want %q", err, want)
 	}
 	// Exactly at the limit is fine, and one under is not.
-	if err := validClaimPassword("1234567890123456"); err != nil {
+	atLimit := strings.Repeat("a", claimPasswordMinLength)
+	if err := validClaimPassword(atLimit); err != nil {
 		t.Fatalf("a %d-character password was refused: %v", claimPasswordMinLength, err)
 	}
-	if err := validClaimPassword("123456789012345"); err == nil {
+	if err := validClaimPassword(strings.Repeat("a", claimPasswordMinLength-1)); err == nil {
 		t.Fatal("a password one character short was accepted")
 	}
 	// Characters, not bytes: a password in a script that does not fit in
 	// one byte per letter must not face a longer rule than an English one.
-	if err := validClaimPassword("ねこがすきです、とてもすきだ"); err == nil {
-		t.Fatal("a 14-character password was accepted because its bytes were counted")
+	// Each of these runes is three bytes, so counting bytes would accept the
+	// short one and counting characters refuses it. Sized from the constant,
+	// like the ASCII cases above.
+	shortRunes := strings.Repeat("ね", claimPasswordMinLength-1)
+	if err := validClaimPassword(shortRunes); err == nil {
+		t.Fatalf("a %d-character password (%d bytes) was accepted because its bytes were counted",
+			claimPasswordMinLength-1, len(shortRunes))
 	}
-	if err := validClaimPassword("ねこがすきです、とてもすきだよ、"); err != nil {
-		t.Fatalf("a 16-character non-ASCII password was refused: %v", err)
+	if err := validClaimPassword(strings.Repeat("ね", claimPasswordMinLength)); err != nil {
+		t.Fatalf("a %d-character non-ASCII password was refused: %v", claimPasswordMinLength, err)
 	}
 
 	// And end to end: the claim is refused, nothing is written, the install
@@ -190,7 +205,7 @@ func TestAShortClaimPasswordIsRefused(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a short password answered %d, want 400", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "at least 16 characters") {
+	if !strings.Contains(rec.Body.String(), fmt.Sprintf("at least %d characters", claimPasswordMinLength)) {
 		t.Fatalf("the refusal does not state the rule:\n%s", rec.Body.String())
 	}
 	if strings.Contains(rec.Body.String(), "hunter2") {

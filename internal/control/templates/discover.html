@@ -2,30 +2,105 @@
 {{if .Err}}
 <p class="outcome-refused">{{.Err}}</p>
 {{else}}
-<p class="hint">Swept {{.Scanned}} addresses in {{.Range}} on port 9000.{{if .Configured}} {{.Configured}} of them answered but are already added, so they were left alone.{{end}}</p>
+<p class="hint">Scanned {{.Scanned}} addresses on {{.Range}}, including battery cameras.{{if .Configured}} {{.Configured}} answered but are already added, so they were left alone.{{end}}</p>
 {{if not .Found}}
-<p class="hint">Nothing else answered. A camera has to be powered on and on this network to
-be found here; if you know its address, type it above instead.</p>
+<p class="hint">Nothing else answered. A camera has to be powered on and on one of these
+networks to be found; if you know its address, add it by address below.</p>
 {{else}}
+
+{{/* The found cameras, added together in one request without leaving the
+     page. Each card carries its own add checkbox; a camera that needs a
+     password (the credential-free scan could not read it) carries a
+     password field of its own instead, because on these cameras different
+     cameras can have different passwords. */}}
+<form id="add-found">
 {{range .Found}}
-<div class="card">
+{{template "found-camera-card" .}}
+{{end}}
+<button type="submit" id="add-found-button">Add the selected cameras</button>
+</form>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* One discovered camera. Rendered in the scan's loop above, and on its
+     own by serveIdentify when a password is supplied for a camera that the
+     credential-free scan could not read -- so the swapped-in card is
+     identical to a freshly scanned one. */}}
+{{define "found-camera-card"}}
+{{if .UID}}
+<div class="card found-camera" data-address="{{.Address}}">
 <div class="camcard-head">
+<label class="found-pick">
+<input type="checkbox" name="add" value="{{.Address}}" checked>
 <strong>{{.Address}}</strong>
-{{if .Report.Err}}<span class="pill state-down">{{.Report.Err}}</span>{{else}}<span class="tag">{{.Report.Model}}</span>{{end}}
+</label>
+<span class="tag">Battery camera</span>
+<span class="mono dim">{{if .Asleep}}asleep{{else}}awake{{end}}{{if ge .Battery 0}} &middot; {{.Battery}}%{{end}}</span>
 </div>
+<input type="hidden" name="uid.{{.Address}}" value="{{.UID}}">
+<input type="hidden" name="username.{{.Address}}" value="admin">
+<p class="hint mono">UID {{.UID}}</p>
+<div class="found-battery">
+<label class="field found-name"><span class="label">Call it</span>
+<input name="name.{{.Address}}" value="{{.Suggested}}" placeholder="back yard"></label>
+<label class="field"><span class="label">Password</span>
+<input type="password" name="password.{{.Address}}" value="" autocomplete="off" placeholder="this camera's password"></label>
+</div>
+<p class="hint">Added without streams, so it sleeps until you open it. Recordings still work.</p>
+</div>
+{{else}}
+<div class="card found-camera" data-address="{{.Address}}">
+<div class="camcard-head">
+<label class="found-pick">
+<input type="checkbox" name="add" value="{{.Address}}"{{if and (not .Report.Err) .Report.Streams}} checked{{end}}>
+<strong>{{.Address}}</strong>
+</label>
+{{if .Report.Err}}<span class="pill state-down">needs a password</span>{{else}}<span class="tag">{{.Report.Model}}</span>{{end}}
+</div>
+
+{{if .Report.Err}}
+{{/* The scan already found this on the port, so it is a real camera; it
+     just would not open under admin with no password. Ask for this one's
+     password right here. The field has no name, so it never travels with
+     the add form -- the Connect button posts it to /setup/identify on its
+     own, and this card is replaced with what comes back. */}}
+<p class="hint">reostream found a camera here but could not read it without a password.
+Enter this camera's password:</p>
+<div class="cam-auth" style="display:grid;grid-template-columns:1fr auto;gap:8px;max-width:360px">
+<input type="password" class="cam-pass" placeholder="password for this camera" autocomplete="off">
+<button type="button" class="cam-connect quiet">Connect</button>
+</div>
+{{else}}
+{{/* Credentials travel with the add, one pair per camera. username is
+     always admin for a discovered camera; password is blank for the ones
+     the scan read as admin with no password, and set by the page's script
+     when the operator typed one for a camera that needed it. The server
+     never fills password in -- a value here only ever came from this
+     browser -- so the "no credential echoed back" rule still holds. */}}
+<input type="hidden" name="username.{{.Address}}" value="admin">
+<input type="hidden" name="password.{{.Address}}" value="">
+<label class="field found-name"><span class="label">Call it</span>
+<input name="name.{{.Address}}" value="{{.Suggested}}" placeholder="front door"></label>
 {{if .Report.Streams}}
 <div class="table-wrap">
 <table>
-<tr><th>Stream</th><th>Codec</th><th>Resolution</th></tr>
+<tr><th>Use</th><th>Stream</th><th>Codec</th><th>Resolution</th></tr>
+{{$addr := .Address}}
 {{range .Report.Streams}}
 <tr>
+{{if or .Absent .Undetermined}}
+<td></td>
 <td>{{.Name}}</td>
 {{if .Absent}}
 <td colspan="2" class="hint">Not offered by this camera</td>
-{{else if .Undetermined}}
-<td colspan="2" class="state-undetermined">Could not determine: {{.Reason}}</td>
 {{else}}
-<td>{{.Codec}}</td>
+<td colspan="2" class="state-undetermined">Could not determine: {{.Reason}}</td>
+{{end}}
+{{else}}
+<td><input type="checkbox" name="streams.{{$addr}}" value="{{.Name}}" checked></td>
+<td>{{.Name}}</td>
+<td>{{.Codec}}{{if or (eq .Codec "h265") (eq .Codec "hevc")}} <span class="hint">(not shown in a browser; still recorded)</span>{{end}}</td>
 <td>{{.Width}}x{{.Height}}</td>
 {{end}}
 </tr>
@@ -33,9 +108,15 @@ be found here; if you know its address, type it above instead.</p>
 </table>
 </div>
 {{end}}
-<button type="button" class="use-found quiet" data-address="{{.Address}}" data-streams="{{range .Report.Streams}}{{if and (not .Absent) (not .Undetermined)}}{{.Name}} {{end}}{{end}}">Use this one</button>
+{{if gt .Report.Channels 1}}
+<p class="hint">This is a {{.Report.Channels}}-lens camera. reostream serves the main lens above;
+the zoom lens is reachable only over RTSP (a camera limitation), at
+<code>rtsp://{{.Address}}/Preview_02_main</code> &mdash; point your recorder straight at that.</p>
+{{end}}
+{{if .Report.ServicesEnabled}}
+<p class="outcome-accepted">Turned on RTSP, ONVIF and the web page on this camera, so your recorder (and any second lens) can reach it.</p>
+{{end}}
+{{end}}
 </div>
-{{end}}
-{{end}}
 {{end}}
 {{end}}

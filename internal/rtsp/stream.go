@@ -3,7 +3,7 @@
 // It exists for compatibility with software that takes an RTSP URL and
 // nothing else. It is not a replacement for the HTTP MPEG-TS output, which
 // is stateless, self-resynchronising and the more forgiving of the two under
-// a network blip. Both run; see docs/design/2026-09-09-rtsp-output.md.
+// a network blip. Both run.
 package rtsp
 
 import (
@@ -38,10 +38,25 @@ const audioProbeFrames = 30
 // regardless of frame rate.
 const rtpClockHz = 90000
 
-// rtpTime converts camera microseconds to RTP ticks, ignoring wrap. Not used
-// for packetising: Micros is a uint32 and wraps every 71.58 minutes, which
-// made timestamps jump backwards and readers drop segments. Packets use
-// ts.Clock instead; this stays for the tests.
+// rtpTime converts a camera microsecond reading to RTP clock ticks without
+// regard for the wrap, which is why nothing in the packetising path may use
+// it. It survives because it is the arithmetic ts.Clock performs internally
+// and the tests pin it.
+//
+// The camera's Micros is a uint32 of microseconds, so it returns to zero
+// every 2^32 microseconds, which is 4294.97 seconds or 71.58 minutes. Fed
+// straight to RTP, every reader saw the timestamp fall by 386,547,056 ticks
+// -- 4,295 seconds at 90 kHz -- on that cycle, and read it as a stall or a
+// seek. Measured on the live fleet on 2026-10-16, Frigate logged "No frames
+// received in 20 seconds" on one or two cameras every 71.5 minutes, and
+// discarded the recording segment it was writing at the time: 69 lost
+// segments a day, spread across all eight cameras because they had been
+// powered on together and their clocks wrapped within seconds of each other.
+//
+// The MPEG-TS output never had this fault; ts.Clock has counted wraps since
+// it was written. Only this path was raw, which is why the symptom followed
+// RTSP readers -- the recorder and the cam wall -- and left the HTTP stream
+// alone.
 func rtpTime(micros uint32) uint32 {
 	return uint32(uint64(micros) * rtpClockHz / 1_000_000)
 }
@@ -90,6 +105,10 @@ type Stream struct {
 	now func() time.Time
 
 	packetised int
+
+	// fps is the frame rate from the camera's last info frame, offered in
+	// the description so ffprobe (and Frigate's camera probe) can read it.
+	fps int
 
 	// talker opens talk sessions on this stream's camera, and speaker is
 	// whether the camera has anything to play them through. Both must be
@@ -176,9 +195,17 @@ func (s *Stream) readerCount() int {
 	return s.readers
 }
 
-// Connected implements stream.ConnectionSink, called once per camera
-// connection. The clock is resumed (see ts.Clock.Resume), and the SDP is
-// rebuilt if the next keyframe brings different parameter sets.
+// Connected implements stream.ConnectionSink. The stream.Run feeding this
+// Stream calls it once per camera connection, before any frame from it.
+//
+// This session outlives the camera connection, so two things have to be
+// re-examined when a new one starts. The timestamp clock: a rebooted camera
+// counts microseconds from zero again, and a clock that is not told either
+// freezes or jumps (ts.Clock.Resume has the measurements). And the
+// parameter sets: the SDP carries the ones from the first keyframe, and a
+// camera that comes back with different ones would leave every reader
+// decoding against stale values, so the first keyframe of the new
+// connection is compared and the description rebuilt only if they differ.
 func (s *Stream) Connected() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,6 +240,12 @@ func (s *Stream) Frame(f baichuan.Frame) {
 		s.videoFrame(f)
 	case baichuan.FrameAAC:
 		s.aacFrame(f)
+	case baichuan.FrameInfo:
+		if f.FPS > 0 {
+			s.mu.Lock()
+			s.fps = f.FPS
+			s.mu.Unlock()
+		}
 	default:
 		// ADPCM has no RTP mapping worth carrying, and relabelling it as
 		// something else would hand a client bytes it cannot decode.
@@ -227,22 +260,30 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 		}
 	}
 
-	// After a reconnect, check the SDP on the first keyframe.
+	// After a reconnect, the first keyframe decides whether the description
+	// still holds. Before the clock, so a rebuilt description and the
+	// resumed timeline start together.
 	s.refreshParameterSets(f)
 
 	// Track the video clock whether or not anyone is watching. The audio
 	// clock is anchored to it, and an anchor that only advances while a
 	// reader is attached would start every new session's audio from
 	// whenever the last one left.
-	// Use the wrap-counting clock. Truncating to 32 bits is the normal RTP
-	// wrap (13.25h at 90 kHz), which readers handle.
+	// Through a wrap-counting clock, never the raw camera reading: see
+	// rtpTime. The 32 bit truncation on the way into the packet is the
+	// ordinary RTP wrap, which happens every 13.25 hours at 90 kHz and is
+	// what readers expect; what they cannot absorb is the clock going
+	// backwards.
 	s.mu.Lock()
 	if s.videoClock == nil {
 		s.videoClock = ts.NewClock()
 	}
 	now := s.wallNow()
 	if s.rebaseClock {
-		// Wall time since the last frame before the reconnect.
+		// The gap is wall time since the last frame of the old connection,
+		// which is the outage as a reader experienced it. For a reconnect
+		// that was not a reboot the camera clock would have given the same
+		// answer; for a reboot it is the only honest answer there is.
 		s.videoClock.Resume(now.Sub(s.lastVideoWall))
 		s.rebaseClock = false
 	}
@@ -410,6 +451,7 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 	// server stream is initialised.
 	s.mu.Lock()
 	audioCfg := s.audioCfg
+	media.FrameRate = float64(s.fps)
 	s.mu.Unlock()
 
 	var audioMedia *description.Media
@@ -489,7 +531,9 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 func videoFormat(f baichuan.Frame) (format.Format, error) {
 	nalus := splitAnnexB(f.Video())
 
-	// Case-insensitive, in case a model spells it differently.
+	// The camera reports its codec as "H265"/"H264". Compare case
+	// insensitively rather than pinning the spelling: this string comes off
+	// the wire and a model that varies it would silently serve nothing.
 	switch strings.ToLower(f.Codec) {
 	case "h265":
 		var vps, sps, pps []byte
@@ -526,8 +570,9 @@ func videoFormat(f baichuan.Frame) (format.Format, error) {
 	}
 }
 
-// sameParameterSets reports whether two formats have the same codec and
-// parameter sets.
+// sameParameterSets reports whether two video formats carry the same codec
+// and the same parameter sets, which is what decides whether a description
+// built from one still describes the other.
 func sameParameterSets(a, b format.Format) bool {
 	switch x := a.(type) {
 	case *format.H265:
@@ -540,10 +585,14 @@ func sameParameterSets(a, b format.Format) bool {
 	return false
 }
 
-// refreshParameterSets rebuilds the SDP if the first keyframe after a
-// reconnect has different parameter sets. Rebuilding drops all readers, so
-// it only happens on a real change. Keyframes without parameter sets are
-// skipped.
+// refreshParameterSets, on the first keyframe after Connected, compares the
+// keyframe's parameter sets with the ones the description was built from
+// and rebuilds the description if they differ. Rebuilding closes the server
+// stream and so drops every reader, which is the right price for a stream
+// that has actually changed and the wrong one for a camera that merely
+// rebooted, which is why the comparison is made at all. A keyframe without
+// usable parameter sets (a truncated one, see errNoParameterSets) decides
+// nothing and the next keyframe is checked instead.
 func (s *Stream) refreshParameterSets(f baichuan.Frame) {
 	if f.Kind != baichuan.FrameIFrame {
 		return

@@ -1,0 +1,38 @@
+{{define "body"}}
+{{template "camsettings-open" .Head}}
+{{if .Err}}<p class="outcome-refused">{{.Err}}</p>{{end}}
+<input type="search" class="raw-filter" id="raw-q" placeholder="Filter values" aria-label="Filter values">
+{{range .Docs}}{{$d := .}}
+<details class="card raw-doc">
+<summary class="sec-head"><h2>{{.Title}}</h2><span class="sec-where">{{len .Values}} values{{if .Unsafe}} &middot; interrupts the stream{{end}}</span></summary>
+{{range .Values}}
+<form class="setting autosave raw-row" method="post" action="/cameras/{{$.Cam}}/raw"{{if $d.Unsafe}} onsubmit="return confirm('This restarts the stream for a moment. Save?')"{{end}}>
+<p class="mono"><span class="tier tier-{{if $d.Unsafe}}interruption{{else}}untested{{end}}"></span>{{.Path}}{{with .Curated}} <span class="dim raw-cur">{{.}}</span>{{end}}</p>
+<div class="control">
+<input type="hidden" name="get" value="{{$d.Get}}"><input type="hidden" name="xpath" value="{{.Path}}">
+{{if .Repeated}}<span class="mono dim">{{.Value}}</span>{{else}}<input type="text" name="value" value="{{.Value}}" class="raw-in">{{end}}
+</div>
+</form>
+{{end}}
+</details>
+{{end}}
+{{template "camsettings-close"}}
+<script src="/assets/settings.js"></script>
+<script>
+(function () {
+  var q = document.getElementById('raw-q');
+  q.addEventListener('input', function () {
+    var t = q.value.trim().toLowerCase();
+    document.querySelectorAll('.raw-doc').forEach(function (sec) {
+      var any = false;
+      sec.querySelectorAll('.raw-row').forEach(function (row) {
+        var hit = !t || row.textContent.toLowerCase().indexOf(t) >= 0 || (row.querySelector('.raw-in') || {}).value === t;
+        row.hidden = !hit; any = any || hit;
+      });
+      sec.hidden = !any;
+      sec.open = !!t && any;
+    });
+  });
+})();
+</script>
+{{end}}

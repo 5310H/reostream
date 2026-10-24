@@ -141,8 +141,7 @@ func TestSaveConfigPreservesTheTargetsExistingMode(t *testing.T) {
 	}
 }
 
-// TestSaveConfigDoesNotWriteWhenTheFleetCheckRejects is Finding 4 from the
-// 2026-09-10 review: writeAndApply used to write the file first and only
+// TestSaveConfigDoesNotWriteWhenTheFleetCheckRejects: writeAndApply used to write the file first and only
 // find out from Reload afterwards that the running fleet could not accept
 // it, which is reachable (an [rtsp] section added to a daemon that booted
 // without one passes config.Load but fails Reload's own RTSP-wiring

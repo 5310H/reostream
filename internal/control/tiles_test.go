@@ -6,8 +6,7 @@ func TestTileURLDefaultsToTheSameOriginMount(t *testing.T) {
 	// An empty StreamBase must resolve against this page's own /stream/
 	// mount, not the browser's current origin left blank: the streaming
 	// listener is on a different port and cannot grow CORS headers, so
-	// same-origin is the only default that actually plays. See Finding 1
-	// in the 2026-09-10 review.
+	// same-origin is the only default that actually plays.
 	if got := tileURL("", "/gate_sub.ts"); got != "/stream/gate_sub.ts" {
 		t.Fatalf("tileURL(\"\", ...) = %q, want the same-origin /stream/ mount", got)
 	}

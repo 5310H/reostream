@@ -89,7 +89,8 @@ func TestSizeComesFromTheInfoPacket(t *testing.T) {
 	}
 }
 
-// No work is done while nobody is subscribed.
+// Nothing is marshalled for nobody: the camera goroutine pays for this feed
+// only while someone is reading it.
 func TestNoWorkWithoutSubscribers(t *testing.T) {
 	st := newStream()
 	st.Frame(key(0)) // must simply not panic or allocate records; nothing to assert beyond running

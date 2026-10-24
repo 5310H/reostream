@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/VoltTech21/reostream/internal/cgi"
 )
@@ -16,18 +17,32 @@ import (
 // value offered here is one the camera itself reported. The curated
 // settings are Baichuan documents, so each default is mapped onto the
 // XPath the page edits. Only fields where that mapping is one to one are
-// mapped. Day and night mode and the LED are not: the CGI API spells their
-// values differently from the Baichuan document, and a reset that wrote a
-// CGI spelling into a Baichuan field would be a guess.
+// mapped. The LED is not: its CGI values do not line up one to one with
+// the Baichuan document's.
 
-// cgiCorner is the CGI API's name for each corner an overlay can sit in.
-// The CGI API also has top and bottom centre, which the Baichuan corner
-// table has no pair for; a camera whose default is centred gets no reset.
+// cgiCorner is the CGI API's name for each corner an overlay can sit in,
+// spaces removed: an RLC-810A reports "LowerRight" and "TopCenter".
+// Bottom centre has no Baichuan pair, so a camera defaulting there gets no
+// reset.
 var cgiCorner = map[string]string{
-	"Upper Left":  "top left",
-	"Upper Right": "top right",
-	"Lower Left":  "bottom left",
-	"Lower Right": "bottom right",
+	"UpperLeft":   "top left",
+	"TopLeft":     "top left",
+	"TopCenter":   "top center",
+	"UpperCenter": "top center",
+	"UpperRight":  "top right",
+	"TopRight":    "top right",
+	"LowerLeft":   "bottom left",
+	"BottomLeft":  "bottom left",
+	"LowerRight":  "bottom right",
+	"BottomRight": "bottom right",
+}
+
+// cgiDayNight is the CGI spelling of each day and night mode, mapped to
+// the Baichuan document's.
+var cgiDayNight = map[string]string{
+	"Auto":        "auto",
+	"Color":       "color",
+	"Black&White": "blackAndWhite",
 }
 
 // readDefaults asks the camera for the factory values of the curated fields
@@ -64,9 +79,13 @@ func readDefaults(ctx context.Context, c *cgi.Client) map[string]string {
 					Enable *int   `json:"enable"`
 					Pos    string `json:"pos"`
 				} `json:"osdTime"`
+				Watermark *int `json:"watermark"`
 			} `json:"Osd"`
 		}
 		if json.Unmarshal(initial, &v) == nil {
+			if v.Osd.Watermark != nil {
+				out["OsdChannelName/enWatermark"] = fmt.Sprint(*v.Osd.Watermark)
+			}
 			if ch := v.Osd.OsdChannel; ch != nil {
 				if ch.Enable != nil {
 					out["OsdChannelName/enable"] = fmt.Sprint(*ch.Enable)
@@ -85,13 +104,37 @@ func readDefaults(ctx context.Context, c *cgi.Client) map[string]string {
 			}
 		}
 	}
+
+	if _, initial, _, err := c.Get(ctx, "GetIsp", 0); err == nil {
+		var v struct {
+			Isp struct {
+				DayNight  string `json:"dayNight"`
+				Mirroring *int   `json:"mirroring"`
+				Rotation  *int   `json:"rotation"`
+			} `json:"Isp"`
+		}
+		if json.Unmarshal(initial, &v) == nil {
+			if mode, ok := cgiDayNight[v.Isp.DayNight]; ok {
+				out["InputAdvanceCfg/DayNight/mode"] = mode
+			}
+			// mirroring and rotation track the document's mirror and flip
+			// exactly: 1,1 on a ceiling-mounted TrackMix, 0,0 on an
+			// RLC-810A, through both protocols.
+			if v.Isp.Mirroring != nil {
+				out["InputAdvanceCfg/mirror"] = fmt.Sprint(*v.Isp.Mirroring)
+			}
+			if v.Isp.Rotation != nil {
+				out["InputAdvanceCfg/flip"] = fmt.Sprint(*v.Isp.Rotation)
+			}
+		}
+	}
 	return out
 }
 
 // cornerPair turns a CGI position name into the "x,y" pair the position
 // control posts.
 func cornerPair(pos string) (string, bool) {
-	label, ok := cgiCorner[pos]
+	label, ok := cgiCorner[strings.ReplaceAll(pos, " ", "")]
 	if !ok {
 		return "", false
 	}

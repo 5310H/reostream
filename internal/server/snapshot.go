@@ -3,6 +3,9 @@ package server
 import (
 	"net/http"
 	"strings"
+
+	"github.com/VoltTech21/reostream/internal/baichuan"
+	"github.com/VoltTech21/reostream/internal/ts"
 )
 
 // serveKeyframe answers GET /<cam>.keyframe (and the _sub and _extern
@@ -70,4 +73,36 @@ func (s *Server) serveKeyframe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(es)
+}
+
+// serveStill answers GET /<cam>.still.ts with the last keyframe as a
+// one-frame MPEG-TS, which a browser's player can decode into a picture.
+// It never touches the camera, which is what a battery camera's tile
+// needs: its last picture, without waking it.
+func (s *Server) serveStill(w http.ResponseWriter, r *http.Request) {
+	h, ok := s.lookup(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), ".still.ts"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	codec, es := h.Keyframe()
+	if es == nil {
+		http.Error(w, "no picture yet", http.StatusNotFound)
+		return
+	}
+	mux, err := ts.NewMuxer(codec)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// The same keyframe a few times, 40 ms apart: one frame alone has no
+	// duration, and a browser's player shows nothing for it.
+	body := append([]byte(nil), mux.Header()...)
+	for i := uint32(0); i < 4; i++ {
+		chunk, _ := mux.FrameWithKey(baichuan.Frame{Kind: baichuan.FrameIFrame, Codec: codec, Data: es, Micros: i * 40_000})
+		body = append(body, chunk...)
+	}
+	w.Header().Set("Content-Type", "video/mp2t")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(body)
 }

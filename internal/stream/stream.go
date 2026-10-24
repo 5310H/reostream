@@ -67,9 +67,17 @@ type FrameSink interface {
 	Frame(baichuan.Frame)
 }
 
-// ConnectionSink is a FrameSink that is told when a new camera connection
-// starts, before its first frame. Sinks that outlive a connection (RTSP)
-// use it to reset their clock after a camera reboot.
+// ConnectionSink is a FrameSink that also wants to know when the camera
+// connection feeding it has been established, which it is told once per
+// connection, before any frame from that connection.
+//
+// A sink whose state outlives one connection needs this. The RTSP output is
+// one: its session, and the timestamp clock behind it, stay up while the
+// camera reconnects, and after a camera reboot the camera's microsecond
+// counter has started over. A clock that is not told treats that as either
+// a stall or a wrap, and a reader sees timestamps that freeze for up to 35
+// minutes or jump forward by up to 71. The HTTP output has no such need
+// because it builds a new muxer per connection.
 type ConnectionSink interface {
 	FrameSink
 	Connected()
@@ -88,6 +96,12 @@ type Config struct {
 	Password string
 	Stream   string // "main", "sub" or "extern"
 	Channel  int    // the camera's channel on a hub or NVR; 0 on its own
+	UID      string // a battery camera's UID; empty for one on TCP
+
+	// IdleTimeout overrides baichuan.DefaultIdleTimeout. A battery camera
+	// that is awake sends within a couple of seconds, so one that does not
+	// is holding a session and is quicker to retry than to wait out.
+	IdleTimeout time.Duration
 
 	// Sink, when non-nil, receives every decoded frame before muxing. Nil
 	// is the default and the only state the HTTP output has ever run in.
@@ -143,15 +157,21 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	// are cumulative counters meant to survive a reconnect, not a rate.
 	defer h.MarkDisconnected()
 
+	if path, ok := nativePaths[cfg.Stream]; ok {
+		return runNative(ctx, cfg, h, path)
+	}
+
 	kind, ok := streamKind(cfg.Stream)
 	if !ok {
 		return fmt.Errorf("stream: %s: unknown stream %q", cfg.Name, cfg.Stream)
 	}
 
 	conn, err := baichuan.Dial(ctx, cfg.Address, baichuan.Options{
-		Username: cfg.Username,
-		Password: cfg.Password,
-		Channel:  cfg.Channel,
+		Username:    cfg.Username,
+		Password:    cfg.Password,
+		Channel:     cfg.Channel,
+		UID:         cfg.UID,
+		IdleTimeout: cfg.IdleTimeout,
 	})
 	if err != nil {
 		return fmt.Errorf("stream: %s: dial: %w", cfg.Name, err)
@@ -303,7 +323,10 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 						}
 
 					case baichuan.FrameInfo:
-						// Pass the picture size on to sinks.
+						// Carries the picture size, which the muxer does not
+						// need (the parameter sets say it) but a sink that
+						// configures a hardware decoder before it has parsed
+						// anything does. See frames.Stream.
 						if cfg.Sink != nil {
 							cfg.Sink.Frame(f)
 						}

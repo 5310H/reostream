@@ -32,6 +32,19 @@ creates. Read the comment on `KillSignal` and `TimeoutStopSec` before changing e
 the daemon is killed before it sends its stream-stop messages, the cameras refuse new
 connections for several minutes.
 
+## Networking
+
+Host networking (`--network host`, or `network_mode: host` in compose) is the default in
+the README, `docker-compose.yml` and the Unraid template. With it, reostream sees your
+real network, so:
+
+- the setup page finds wired cameras by scanning for port 9000, and battery cameras by
+  their UDP search, which only reaches the local network;
+- cameras can upload clips to its FTP receiver (ports 2121-2131).
+
+On bridge networking, map 8560, 8561, 8562 and 2121-2131, and add cameras by address if
+the search does not find them.
+
 ## Docker volumes
 
 - The container runs as uid 65532. A named volume (as in `docker-compose.yml`) just works.
@@ -150,7 +163,9 @@ The control port (8562) is the only part with a password. The streaming port (85
 open, which is what a recorder needs, so you can firewall the two separately.
 
 It shows each stream's state, plays it live, edits the config, tails the log, and has a
-page per camera for settings, floodlight, NTP and timezone. Writes are labeled by how
+page per camera with Live, Recordings and Settings tabs. Settings > Connect to NVR writes
+the stream URLs for Frigate, go2rtc, Blue Iris or Home Assistant, and can merge them into
+a Frigate config you paste in, keeping its comments. Writes are labeled by how
 sure we are they work (proven, unverified, known inert, unsafe), and a 200 from the
 camera is shown as "accepted", not "confirmed", unless it was read back. See
 `docs/control.md`.
@@ -201,3 +216,62 @@ hardware decoder directly. Each record is a 20 byte big-endian header, then the 
 
 A subscriber starts at a keyframe and skips to the next one if it falls behind. Served
 for the streams in the camera's `rtsp` list.
+
+## Recordings and saved clips
+
+A camera with an SD card gets a Recordings tab: the days with footage, the day's clips on
+a timeline filtered by type, and a player with download, in sub or main quality. Clips are
+read off the card only when the tab is open.
+
+reostream also has a small FTP receiver. Settings > Auto-save motion clips, switched on, points the
+camera's own FTP upload at it, so each recording is copied here as it happens and kept for
+a set number of days. Saved clips show first on the Recordings tab and play without asking
+the camera. The button writes this section for you:
+
+```toml
+[ftp]
+listen = ":2121"            # data ports 2122-2131
+dir = "/data/clips"
+keep_days = 14
+```
+
+## Alerts
+
+The cameras' own detections (motion, person, vehicle, animal) are relayed as they happen.
+Set it up under Settings > Events, or in the config:
+
+```toml
+[events]
+mqtt = "192.0.2.5:1883"           # reostream/<camera>/<motion|person|vehicle|animal> ON/OFF, retained, and /event as JSON
+frigate = "http://192.0.2.5:5000" # each detection becomes a Frigate event on the camera of the same name
+```
+
+Wired cameras report their detections live. A battery camera reports motion through the
+clips it uploads; see Battery cameras below.
+
+## Battery cameras
+
+A battery camera (Argus and similar) keeps its TCP ports closed and is reached over UDP by
+its UID. The setup page finds it by its UDP search. Added without streams, it sleeps:
+
+```toml
+[[camera]]
+name = "backyard"
+address = "192.0.2.20"
+uid = "95270000XXXXXXXX"
+password = "$BACKYARD_PW"
+```
+
+- Its sub and main streams run only while someone signed in to the control page is
+  watching: Play on its tile, or its Live tab. They stop 10 seconds after the last viewer
+  leaves, and after 5 minutes whatever happens.
+- The streaming port and RTSP refuse its streams, so a recorder cannot hold it awake.
+- Its tile shows the last picture from the last time it was awake, and its battery level,
+  read from the UDP search without waking it.
+- Motion: turn on Settings > Auto-save motion clips for it. The camera then uploads each
+  motion clip by itself while staying asleep otherwise, and each upload counts as motion
+  for alerts (`reostream/<camera>/motion` on MQTT), about 20 seconds after the motion, when
+  the camera's first file arrives. Motion goes off 30 seconds after its last file.
+- Listing `streams` on a battery camera streams it all the time. Only do that on one with
+  constant power.
+

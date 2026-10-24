@@ -3,7 +3,7 @@
   <Name>reostream</Name>
   <Repository>ghcr.io/volttech21/reostream:latest</Repository>
   <Registry>https://github.com/VoltTech21/reostream/pkgs/container/reostream</Registry>
-  <Network>bridge</Network>
+  <Network>host</Network>
   <Privileged>false</Privileged>
   <Support>https://github.com/VoltTech21/reostream/issues</Support>
   <Project>https://github.com/VoltTech21/reostream</Project>

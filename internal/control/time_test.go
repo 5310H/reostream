@@ -93,6 +93,11 @@ func newFakeNTPCamera(t *testing.T, enable int, server string, timeZone int) *fa
 			}
 			atomic.AddInt32(&f.sets, 1)
 			w.Write([]byte(`[{"cmd":"SetNtp","code":0}]`))
+		// A real camera answers Logout, and every handler that dials a
+		// client now hands the session back -- see cgi.Client.Close and
+		// the exhaustion it exists to prevent.
+		case "Logout":
+			w.Write([]byte(`[{"cmd":"Logout","code":0,"value":{"rspCode":200}}]`))
 		default:
 			t.Errorf("unexpected cmd %q", r.URL.Query().Get("cmd"))
 		}
@@ -220,7 +225,6 @@ func TestServeTimeRendersNTPAndTheTimezoneForm(t *testing.T) {
 		// with it, left the page when the picker started naming zones: the
 		// derivation lives in docs/measurements.md, and the page now says
 		// the zone by name instead.
-		"camera's CGI API",
 		// Both forms, and both every-camera boxes.
 		`action="/cameras/cam1/time"`,
 		`action="/cameras/cam1/timezone"`,

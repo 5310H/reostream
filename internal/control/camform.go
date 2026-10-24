@@ -1,10 +1,12 @@
 package control
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 	"github.com/VoltTech21/reostream/internal/config"
@@ -48,10 +50,20 @@ func printableField(label, v string) error {
 }
 
 func applyCameraForm(cfg *config.Config, form url.Values) error {
+	// The camera list's password box starts empty: left empty, it keeps
+	// the password the camera has. (It used to carry passwordUnchanged as
+	// its value, but html/template writes the NUL that sentinel starts with
+	// as U+FFFD, so the browser sent back something else and every save
+	// failed as "not valid text".)
+	if form.Get("password") == "" {
+		form = cloneValues(form)
+		form.Set("password", passwordUnchanged)
+	}
 	fields := []struct{ label, value string }{
 		{"the camera name", form.Get("name")},
 		{"the address", form.Get("address")},
 		{"the username", form.Get("username")},
+		{"the UID", form.Get("uid")},
 	}
 	// The password is checked only when it is a real one. The sentinel the
 	// form submits for "leave it alone" deliberately begins with a NUL so
@@ -74,12 +86,22 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		Password: form.Get("password"),
 		Streams:  form["streams"],
 		RTSP:     form["rtsp"],
+		UID:      strings.TrimSpace(form.Get("uid")),
 	}
 	// The page has no RTSP field. With RTSP on, serve every stream the
 	// camera pulls; reading the missing field as "none" dropped the
 	// camera from RTSP on every edit.
 	if _, ok := form["rtsp"]; !ok && cfg.RTSP != nil {
 		cam.RTSP = append([]string(nil), cam.Streams...)
+	}
+
+	// A camera with no stream ticked saves without error and then pulls
+	// nothing -- the one mistake this form could make that looks like
+	// success. Refuse it with a message that says what to do.
+	// A battery camera (a UID) is the exception: with no streams reostream
+	// only reaches it on demand and never holds it awake.
+	if len(cam.Streams) == 0 && cam.UID == "" {
+		return fmt.Errorf("pick at least one stream to pull (main, sub or extern): a camera with none set up records nothing")
 	}
 
 	for i, existing := range cfg.Cameras {
@@ -93,6 +115,9 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		// has. Dropping it would quietly repoint a hub camera at channel 0,
 		// which is another camera.
 		cam.Channel = existing.Channel
+		if cam.UID == "" {
+			cam.UID = existing.UID
+		}
 		cfg.Cameras[i] = cam
 		// cfg.Validate: the daemon's own validation runs over the whole
 		// config, so a form submission is held to exactly the rules
@@ -145,6 +170,9 @@ func (c formCamera) HasStream(name string) bool {
 type cameraListEntry struct {
 	formCamera
 	Group cameraGroup
+	// Streams is the toggles this camera gets: the ones it has, plus any
+	// already set so they can be turned off.
+	Streams []string
 }
 
 type camerasPage struct {
@@ -156,10 +184,10 @@ type camerasPage struct {
 	ReloadNote string
 }
 
-func (s *Server) camerasPage() camerasPage {
+func (s *Server) camerasPage(ctx context.Context) camerasPage {
 	page := camerasPage{
 		Title:      "Cameras",
-		AllStreams: []string{"main", "sub", "extern"},
+		AllStreams: []string{"main", "sub", "extern", "zoom"},
 		Unchanged:  passwordUnchanged,
 	}
 	// LoadRaw, not Load: this page renders the config's own text back into
@@ -170,17 +198,50 @@ func (s *Server) camerasPage() camerasPage {
 		page.Error = err.Error()
 		return page
 	}
-	for _, cam := range cfg.Cameras {
-		page.Cameras = append(page.Cameras, cameraListEntry{
-			formCamera: formCamera{Camera: cam},
-			Group:      s.cameraGroupFor(cam.Name),
-		})
+	entries := make([]cameraListEntry, len(cfg.Cameras))
+	var wg sync.WaitGroup
+	for i, cam := range cfg.Cameras {
+		entries[i] = cameraListEntry{formCamera: formCamera{Camera: cam}, Group: s.cameraGroupFor(cam.Name)}
+		wg.Add(1)
+		go func(i int, cam config.Camera) {
+			defer wg.Done()
+			entries[i].Streams = s.availableStreams(ctx, cam)
+		}(i, cam)
 	}
+	wg.Wait()
+	page.Cameras = entries
 	return page
 }
 
+// availableStreams is the streams a camera can be set to pull. Main and
+// sub every camera has; extern unless the camera says it has none; zoom
+// only when its RTSP serves one; a battery camera main and sub only. A
+// stream already set always stays, so it can be turned off.
+func (s *Server) availableStreams(ctx context.Context, raw config.Camera) []string {
+	have := map[string]bool{"main": true, "sub": true}
+	if raw.UID == "" {
+		if cam, err := s.byName(raw.Name); err == nil {
+			id := s.identFor(ctx, cam)
+			if id.Support == nil || id.Support.HasExternStream() {
+				have["extern"] = true
+			}
+			have["zoom"] = id.Zoom
+		}
+	}
+	for _, st := range raw.Streams {
+		have[st] = true
+	}
+	var out []string
+	for _, st := range []string{"main", "sub", "extern", "zoom"} {
+		if have[st] {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
 func (s *Server) serveCameras(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "cameras.html", s.camerasPage())
+	s.render(w, "cameras.html", s.camerasPage(r.Context()))
 }
 
 // cameraBlockText renders one camera as the [[camera]] block a person
@@ -221,6 +282,9 @@ func cameraBlockText(cam config.Camera) string {
 	}
 	if cam.Channel != 0 {
 		fmt.Fprintf(&b, "channel = %d\n", cam.Channel)
+	}
+	if cam.UID != "" {
+		fmt.Fprintf(&b, "uid = %q\n", cam.UID)
 	}
 	writeList("streams", cam.Streams)
 	writeList("rtsp", cam.RTSP)
@@ -328,6 +392,36 @@ func upsertCameraBlock(text string, cam config.Camera) string {
 	return prefix + block + strings.Join(lines[end:], "\n")
 }
 
+// removeCameraBlock drops the [[camera]] block named name from the config
+// text, leaving the rest byte-for-byte, and reports whether it found one.
+//
+// It takes the blank lines around the block with it, so removing a camera
+// from the middle does not leave a double gap and removing the last one
+// does not leave a trailing blank run -- the file reads the way a
+// hand-written one would. The result still goes through writeAndApply,
+// which validates it parses before anything is kept.
+func removeCameraBlock(text, name string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	start, end, found := findCameraBlock(lines, name)
+	if !found {
+		return text, false
+	}
+	for end < len(lines) && strings.TrimSpace(lines[end]) == "" {
+		end++
+	}
+	for start > 0 && strings.TrimSpace(lines[start-1]) == "" {
+		start--
+	}
+	kept := make([]string, 0, len(lines))
+	kept = append(kept, lines[:start]...)
+	kept = append(kept, lines[end:]...)
+	out := strings.Join(kept, "\n")
+	if strings.TrimSpace(out) == "" {
+		return "", true
+	}
+	return out, true
+}
+
 // saveCamera folds one camera into the config text and then goes through
 // the same write and apply path the raw editor uses. Handing the text to
 // writeAndApply is what keeps that one path: a second writer would be a
@@ -344,7 +438,7 @@ func (s *Server) saveCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fail := func(err error) {
-		page := s.camerasPage()
+		page := s.camerasPage(r.Context())
 		page.Error = err.Error()
 		s.render(w, "cameras.html", page)
 	}
@@ -382,11 +476,53 @@ func (s *Server) saveCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	note, err := s.writeAndApply(upsertCameraBlock(text, cam))
-	page := s.camerasPage()
+	page := s.camerasPage(r.Context())
 	if err != nil {
 		page.Error = err.Error()
 	} else {
 		page.ReloadNote = note
 	}
 	s.render(w, "cameras.html", page)
+}
+
+// serveRemoveCamera takes one camera out of the config and reloads, through
+// the same write-and-apply path every other change uses. It is the one
+// thing a non-technical operator previously could not do without editing
+// the file by hand: a camera added wrong -- a typo'd address, the wrong
+// password -- had no button to undo it, and a camera already in the config
+// is skipped by the scan, so there was no way to add it again correctly
+// either. The page it answers with is the camera list, since the camera
+// whose page the request came from is gone.
+func (s *Server) serveRemoveCamera(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	text, err := loadRawConfig(s.opts.ConfigPath)
+	if err != nil {
+		page := s.camerasPage(r.Context())
+		page.Error = err.Error()
+		s.render(w, "cameras.html", page)
+		return
+	}
+	newText, ok := removeCameraBlock(text, name)
+	if !ok {
+		page := s.camerasPage(r.Context())
+		page.Error = fmt.Sprintf("there is no camera named %q to remove", name)
+		s.render(w, "cameras.html", page)
+		return
+	}
+	note, err := s.writeAndApply(newText)
+	page := s.camerasPage(r.Context())
+	if err != nil {
+		page.Error = err.Error()
+	} else {
+		page.ReloadNote = note
+	}
+	s.render(w, "cameras.html", page)
+}
+
+func cloneValues(v url.Values) url.Values {
+	out := make(url.Values, len(v))
+	for k, vs := range v {
+		out[k] = append([]string(nil), vs...)
+	}
+	return out
 }

@@ -269,16 +269,31 @@ const (
 	prefixUnusable                      // the header did not say usefully
 )
 
-// statedPrefix returns the metadata length declared at header offset 12.
-// It is counted from the end of the common 24-byte header, so an I frame's
-// extra fields are included (112 bytes of metadata declares 120).
+// statedPrefix returns the metadata length declared by the packet header.
 //
-// Searching for the first NAL misfires on P frames about 1 in 2000, since
-// metadata can look like a type-1 NAL header. The declared length matched
-// a start code in all 287 packets in testdata. It is still validated, and
-// the caller falls back to the search if it doesn't check out.
+// The word at offset 12 holds it, measured from the end of the 24 bytes both
+// packet kinds share rather than from the end of this packet's header, so an
+// I frame's extra time_t and unknown word are counted inside it. That is why
+// an I frame carrying 112 bytes of metadata declares 120.
 //
-// settled means the packet is complete, so an unverifiable length is wrong.
+// This is the whole corruption problem solved by reading instead of
+// guessing. searchPrefix has to recognise the first NAL by its header bits,
+// and a P frame's first NAL is type 1 with any nal_ref_idc -- four byte
+// values that metadata hits by chance about one frame in two thousand.
+// Every such miss both leaks metadata into the picture and cuts the same
+// number of bytes off its tail. The declared length has no such failure
+// mode: across the committed captures it lands on a NAL start code in 287
+// of 287 complete packets, H.264 and HEVC, I frames and P frames alike.
+//
+// It is still checked rather than trusted. The bytes it points at must
+// begin a start code and a NAL header the codec allows, because a camera
+// that puts something else in that word must not be able to make this worse
+// than the search it replaces; it falls back to the search when the claim
+// does not hold up, which is also what happens for a camera whose metadata
+// this field does not describe.
+// settled says the packet is already complete as the search reads it, so no
+// further bytes are coming and a declaration that cannot be checked by now
+// never will be.
 func statedPrefix(buf []byte, hdr int, codec string, settled bool) (int, prefixVerdict) {
 	const base = 24 // the header both packet kinds share
 	if len(buf) < base+4 {
@@ -380,9 +395,15 @@ func (d *Depacketiser) Next() (Frame, bool) {
 			// showed up as "error while decoding MB x 141..159" rather than
 			// as a stream that failed outright.
 			codec := string(trimNul(d.buf[4:8]))
-			// Prefer the declared prefix length. The search is the fallback,
-			// and also tells us whether the packet is complete so a bogus
-			// length can't make us wait forever.
+			// The header says how long the metadata is, so the picture's
+			// first byte is a fact to read rather than a pattern to hunt
+			// for. Prefer that; see statedPrefix.
+			// The search runs either way, as the fallback and as the judge
+			// of whether the packet is already all here: if it is, and the
+			// declared length still cannot be checked, then the declaration
+			// disagrees with the packet's own length and is not to be
+			// believed. Without that test a camera declaring something
+			// absurd would make this wait for bytes that are never coming.
 			search := searchPrefix(d.buf, hdr, codec, kind)
 			prefix, verdict := statedPrefix(d.buf, hdr, codec, len(d.buf) >= hdr+search+size)
 			switch verdict {

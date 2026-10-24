@@ -352,6 +352,9 @@ func (s *Server) writeAndApply(text string) (string, error) {
 			note += " Restart required for: " + strings.Join(moved, ", ") + "."
 		}
 	}
+	// The clip receiver and the alert relay follow the file too.
+	go s.syncReceiver()
+	go s.syncRelay()
 	return note, nil
 }
 

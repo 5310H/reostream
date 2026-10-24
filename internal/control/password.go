@@ -28,6 +28,14 @@ type passwordPage struct {
 	EnvVar     string
 	Error      string
 	ConfigPath string
+
+	// MinLength is claimPasswordMinLength, passed through for the same
+	// reason the claim page passes it: the form's own minlength attribute
+	// must not drift from the rule the server enforces. It did -- this
+	// template carried a hardcoded 16 and went on advertising it after the
+	// floor moved to 12, so the box refused a password serveApplyPassword
+	// would have taken.
+	MinLength int
 }
 
 // controlPasswordLine finds the password assignment inside the [control]
@@ -36,7 +44,15 @@ type passwordPage struct {
 // password into the file in place of the $VARIABLE references that were
 // there, and this edit must not reintroduce that. The file's own bytes are
 // edited, and everything outside the matched line is returned untouched.
-var controlPasswordRE = regexp.MustCompile(`(?m)^(\s*password\s*=\s*)(".*"|'.*')\s*$`)
+//
+// [^\S\n] rather than \s for the horizontal padding, and it matters: \s
+// matches a newline, so with (?m) the old `\s*$` ran PAST the end of the
+// password line and consumed the blank line after it. The replacement put
+// no newline back, so a config whose [control] table is followed by another
+// one -- which is every real config, the cameras come after it -- came out
+// as `password = "new"[[camera]]` and the daemon then refused to parse its
+// own file. See TestChangingThePasswordLeavesAParsableConfig.
+var controlPasswordRE = regexp.MustCompile(`(?m)^([^\S\n]*password[^\S\n]*=[^\S\n]*)(".*"|'.*')[^\S\n]*$`)
 
 // controlSection returns the byte range of the [control] table in raw, or
 // ok false when there is none.
@@ -84,7 +100,7 @@ func setControlPassword(raw, pw string) (string, error) {
 }
 
 func (s *Server) servePasswordPage(w http.ResponseWriter, r *http.Request) {
-	page := passwordPage{Title: "Password", ConfigPath: s.opts.ConfigPath}
+	page := passwordPage{Title: "Password", ConfigPath: s.opts.ConfigPath, MinLength: claimPasswordMinLength}
 	if raw, err := loadRawConfig(s.opts.ConfigPath); err == nil {
 		if cur, ok := currentControlPassword(raw); ok {
 			if name, isRef := strings.CutPrefix(cur, "$"); isRef {
@@ -96,7 +112,7 @@ func (s *Server) servePasswordPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveApplyPassword(w http.ResponseWriter, r *http.Request) {
-	page := passwordPage{Title: "Password", ConfigPath: s.opts.ConfigPath}
+	page := passwordPage{Title: "Password", ConfigPath: s.opts.ConfigPath, MinLength: claimPasswordMinLength}
 
 	raw, err := loadRawConfig(s.opts.ConfigPath)
 	if err != nil {
@@ -105,18 +121,30 @@ func (s *Server) serveApplyPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An install whose password comes from the environment is refused
-	// rather than rewritten. Writing a literal here would work, and would
-	// also silently detach the file from the variable the container is
-	// started with: the next deploy would set REOSTREAM_CONTROL_PASSWORD
-	// to one thing and the page would want another, with nothing on
-	// either side saying why. The operator changes it where it lives.
+	// An install whose password comes from the environment is a question,
+	// not a refusal.
+	//
+	// It used to be a refusal, on the reasoning that writing a literal
+	// would silently detach the file from the variable the container is
+	// started with, so the operator should change it where it lives. The
+	// reasoning holds; the conclusion did not. The README's only [control]
+	// example uses $REOSTREAM_CONTROL_PASSWORD, so every install that
+	// followed the documentation landed here, and "change it where it
+	// lives" means docker rm and recreate -- which the documentation never
+	// said, and which is not a thing to ask of somebody who just wants a
+	// password they can remember.
+	//
+	// So the page explains the consequence and offers to do it anyway.
+	// Detaching from the variable is fine when it is chosen; it was only
+	// bad when it was silent.
 	if cur, ok := currentControlPassword(raw); ok {
 		if name, isRef := strings.CutPrefix(cur, "$"); isRef {
 			page.FromEnv, page.EnvVar = true, name
-			page.Error = fmt.Sprintf("This install reads its password from the environment variable %s, so there is nothing here to change. Set %s to the new password where this daemon is started, then restart it.", name, name)
-			s.render(w, "password.html", page)
-			return
+			if r.FormValue("detach") == "" {
+				page.Error = fmt.Sprintf("This install reads its password from the environment variable %s. Changing it here writes the new password into %s and the daemon stops reading %s -- so remove it from wherever this daemon is started, or the next deploy will look like it changed the password back. Tick the box to go ahead, or set %s where the daemon starts instead.", name, s.opts.ConfigPath, name, name)
+				s.render(w, "password.html", page)
+				return
+			}
 		}
 	}
 

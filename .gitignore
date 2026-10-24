@@ -18,3 +18,6 @@ reostream.toml
 .DS_Store
 *.swp
 internal/rtsp/testdata/*.bin
+
+# Local beta instance: config with real camera passwords, and its binary.
+.beta/

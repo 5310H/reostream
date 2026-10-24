@@ -37,7 +37,7 @@ func TestAnUnknownFisheyeModeStillReads(t *testing.T) {
 // is not recoverable at all without redrawing them, and an operator who
 // was not told will not know to.
 func TestTheFisheyeConfirmationNamesBothConsequences(t *testing.T) {
-	for _, want := range []string{"reboot", "zone"} {
+	for _, want := range []string{"restart", "zone"} {
 		if !contains(fisheyeConfirmReason, want) {
 			t.Errorf("the confirmation does not mention %q: %s", want, fisheyeConfirmReason)
 		}

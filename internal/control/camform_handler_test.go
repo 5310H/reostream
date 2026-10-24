@@ -11,9 +11,9 @@ import (
 	"github.com/VoltTech21/reostream/internal/control"
 )
 
-// TestSavingOneCameraDoesNotLeakAnUnrelatedCamerasResolvedPassword proves
-// the correction to Task 11's brief: the camera form must read the config
-// file with config.LoadRaw, not config.Load, because Load resolves a
+// TestSavingOneCameraDoesNotLeakAnUnrelatedCamerasResolvedPassword: the
+// camera form must read the config file with config.LoadRaw, not
+// config.Load, because Load resolves a
 // "$NAME" password into the real secret. Folding an unrelated edit through
 // a resolving loader and re-encoding would write every camera's live
 // credential into the config file in plaintext, not just the one the

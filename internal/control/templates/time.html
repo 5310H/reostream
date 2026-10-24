@@ -12,95 +12,172 @@
   its own selected option rather than being rounded away.
 */}}
 {{define "body"}}
-<h1>{{.Camera.Name}}</h1>
-<p class="subtitle">{{.Camera.Address}}</p>
-
-<nav class="tabs">
-<a href="/cameras/{{.Camera.Name}}">Overview</a>
-<a href="/cameras/{{.Camera.Name}}/advanced">Advanced</a>
-<a href="/cameras/{{.Camera.Name}}/time" aria-current="page">Time</a>
-<a href="/cameras/{{.Camera.Name}}/accounts">Accounts</a>
-</nav>
+{{template "camsettings-open" .Head}}
 
 {{template "flash" .Flash}}
 
-<details class="help">
-<summary><span class="mark">?</span>How these are written</summary>
-<p>Both go over the camera's CGI API. No Baichuan set-time message has ever been recovered, so that is the only path there is.</p>
-</details>
-
-<div class="camera-cols">
-<div>
-
 <section>
-<h2>Clock</h2>
-{{if .TimeZoneErr}}<p class="outcome-refused">{{.TimeZoneErr}}</p>{{else}}
-<p class="hint">This camera is set to <strong>{{.TimeZoneLabel}}</strong>. It applies its own daylight saving on top, so the clock in the picture can read an hour off this and still be right.</p>
-{{end}}
+<div class="sec-head"><h2>Clock</h2><span class="sec-where">on camera</span></div>
+{{if .TimeZoneErr}}<p class="outcome-refused">{{.TimeZoneErr}}</p>{{end}}
 {{if .NTPErr}}<p class="outcome-refused">{{.NTPErr}}</p>{{end}}
 
-{{/* Two forms because they are two writes to two endpoints, one card
-     because to an operator they are one subject. onsubmit asks only when
-     the box is ticked: one camera is the write these forms have always
-     made, the whole fleet is worth a second look. */}}
-<form method="post" action="/cameras/{{.Camera.Name}}/timezone" onsubmit="return !this.every.checked || confirm('write this timezone to every camera in the fleet?')">
-<div class="setting">
-<p>Timezone</p>
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/time/sync" data-nav>
+<p><span class="tier tier-instant"></span>Camera clock{{template "info" "Sync now sets the camera's clock from reostream's (this machine's own, kept right by the system)."}}</p>
 <div class="control">
-<select name="timezone" style="width:17rem">
-{{if .TimeZoneUnlisted}}<option value="{{.TimeZone}}" selected>{{.TimeZoneLabel}} (as this camera holds it)</option>{{end}}
-{{range .TimeZoneChoices}}<option value="{{.Seconds}}"{{if eq .Seconds $.TimeZone}} selected{{end}}>{{.Label}}</option>
-{{end}}</select>
+<span class="mono{{if ne .ClockDrift "in sync"}} warn{{end}}">{{if .ClockDrift}}{{.ClockDrift}}{{else}}not read{{end}}</span>
+<button type="submit">Sync now</button>
+<label class="every"><input type="checkbox" name="every" value="1"> all cameras</label>
 </div>
-</div>
-<div class="setting">
-<p><label for="tz-every">Apply to all cameras</label></p>
-<div class="control"><input type="checkbox" id="tz-every" name="every" value="1"></div>
-</div>
-<button type="submit">Set timezone</button>
 </form>
 
-<div class="docrow"></div>
-
-<form method="post" action="/cameras/{{.Camera.Name}}/time" onsubmit="return !this.every.checked || confirm('write this ntp server to every camera in the fleet?')">
-<div class="setting">
-<p>Sync with a time server</p>
+{{if .HourFmtRead}}
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/time/hourfmt" data-nav>
+<p><span class="tier tier-instant"></span>Clock format{{template "info" "How the camera writes the time in its timestamp: 12 hour with am/pm, or 24 hour."}}</p>
 <div class="control">
-{{/* A switch, but one that does not save by itself: this form also
-     carries the server and the every-camera box, and the set button below
-     sends all three together. */}}
+<div class="segmented" role="radiogroup" aria-label="Clock format" style="min-width:0">
+<label><input type="radio" name="value" value="12"{{if .TwelveHour}} checked{{end}} onchange="this.form.submit()"><span>12 hour</span></label>
+<label><input type="radio" name="value" value="24"{{if not .TwelveHour}} checked{{end}} onchange="this.form.submit()"><span>24 hour</span></label>
+</div>
+<label class="every"><input type="checkbox" name="every" value="1"> all cameras</label>
+</div>
+</form>
+{{end}}
+{{if .DateFormat}}
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/time/datefmt" data-nav>
+<p><span class="tier tier-instant"></span>Date format{{template "info" "How the camera writes the date in its timestamp."}}</p>
+<div class="control">
+<select name="value" onchange="this.form.submit()">
+{{range .DateFormats}}<option value="{{.}}"{{if eq . $.DateFormat}} selected{{end}}>{{.}}</option>{{end}}
+</select>
+<label class="every"><input type="checkbox" name="every" value="1"> all cameras</label>
+</div>
+</form>
+{{end}}
+
+<form class="setting" method="post" action="/cameras/{{.Camera.Name}}/time/daily" data-nav>
+<p><span class="tier tier-instant"></span>Daily sync{{template "info" "Every wired camera's clock is set from reostream's once a day at this time. Battery cameras are left out so they are not woken each day. Leave empty for off."}}</p>
+<div class="control">
+<input type="time" name="daily_sync" value="{{.DailySync}}" style="width:8rem">
+<button type="submit" class="quiet">Save</button>
+{{if .LastDailySync}}<span class="hint">last: {{.LastDailySync}}</span>{{end}}
+</div>
+</form>
+
+<form class="setting autosave" method="post" action="/cameras/{{.Camera.Name}}/timezone" onsubmit="return !this.every.checked || confirm('Set this time zone on every camera?')">
+<p><span class="tier tier-instant"></span>Time zone{{template "info" "The camera adds daylight saving itself."}}</p>
+<div class="control tz">
+<select name="timezone" id="tz-select" hidden>
+{{if .TimeZoneUnlisted}}<option value="{{.TimeZone}}" selected>{{.TimeZoneLabel}}</option>{{end}}
+{{range .TimeZoneChoices}}<option value="{{.Seconds}}"{{if eq .Seconds $.TimeZone}} selected{{end}}>{{.Label}}</option>
+{{end}}</select>
+<div class="tz-pick">
+<input type="text" id="tz-q" autocomplete="off" spellcheck="false" aria-label="Search time zones" placeholder="City or UTC offset">
+<ul class="tz-list" id="tz-list" hidden></ul>
+</div>
+<span class="mono dim" id="tz-now"></span>
+<button type="button" class="linkish" id="tz-mine">Use this computer's zone</button>
+<label class="every"><input type="checkbox" id="tz-every" name="every" value="1"> all cameras</label>
+</div>
+</form>
+
+<form class="autosave" method="post" action="/cameras/{{.Camera.Name}}/time" onsubmit="return !this.every.checked || confirm('Set this time server on every camera?')">
+<div class="setting">
+<p><span class="tier tier-instant"></span>Sync with a time server</p>
+<div class="control">
 <input type="hidden" name="enabled" value="{{if .NTPEnabled}}1{{else}}0{{end}}">
-<button type="button" class="switch" data-field="enabled" data-hold aria-label="NTP enabled" aria-pressed="{{if .NTPEnabled}}true{{else}}false{{end}}"><span class="knob"></span></button>
+<button type="button" class="switch" data-field="enabled" aria-label="Sync with a time server" aria-pressed="{{if .NTPEnabled}}true{{else}}false{{end}}" data-governs="row-ntp-server"><span class="knob"></span></button>
 </div>
 </div>
-<div class="setting">
-<p>Time server</p>
-<div class="control"><input type="text" name="server" value="{{.NTPServer}}" style="width:14rem"></div>
+<div class="setting" id="row-ntp-server">
+<p><span class="tier tier-instant"></span>Time server</p>
+<div class="control"><input type="text" name="server" value="{{.NTPServer}}" style="width:14rem">
+<label class="every"><input type="checkbox" id="ntp-every" name="every" value="1"> all cameras</label></div>
 </div>
-<div class="setting">
-<p><label for="ntp-every">Apply to all cameras</label></p>
-<div class="control"><input type="checkbox" id="ntp-every" name="every" value="1"></div>
-</div>
-<button type="submit">Set time server</button>
 </form>
 </section>
 
-</div>
-<div>
-
 {{if .Results}}
 <section>
-<h2>Applied to every camera{{if .ResultsTarget}}: {{.ResultsTarget}}{{end}}</h2>
-<p class="hint">One row per camera, always. A camera that failed did not stop the rest from being tried, and a camera that answered success without changing anything reads as accepted, not confirmed.</p>
-<table>
-<tr><th>Camera</th><th>Outcome</th><th>Detail</th></tr>
+<div class="sec-head"><h2>All cameras{{if .ResultsTarget}}: {{.ResultsTarget}}{{end}}</h2></div>
+<table class="nvr-table">
+<tr><th>Camera</th><th>Result</th><th>Detail</th></tr>
 {{range .Results}}
 <tr><td>{{.Camera}}</td><td class="outcome-{{.Outcome}}">{{.Outcome}}</td><td class="mono">{{.Detail}}</td></tr>
 {{end}}
 </table>
 </section>
 {{end}}
-
-</div>
-</div>
+{{template "camsettings-close"}}
+<script src="/assets/settings.js"></script>
+<script>
+// Time zone picker: every city the browser knows, at its standard (winter)
+// offset, since the camera adds daylight saving itself. Offsets are stored
+// west-positive in seconds, the camera's own way.
+(function () {
+  var sel = document.getElementById('tz-select'), q = document.getElementById('tz-q'),
+      list = document.getElementById('tz-list'), now = document.getElementById('tz-now');
+  if (!sel) return;
+  var offsets = Array.prototype.map.call(sel.options, function (o) { return {v: o.value, label: o.textContent.trim()}; });
+  function stdOffsetSeconds(zone) {
+    var y = new Date().getFullYear(), worst = null;
+    [new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y, 6, 1))].forEach(function (d) {
+      var p = new Intl.DateTimeFormat('en-US', {timeZone: zone, hour12: false, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric'}).formatToParts(d);
+      var g = {}; p.forEach(function (x) { g[x.type] = +x.value; });
+      var local = Date.UTC(g.year, g.month - 1, g.day, g.hour % 24, g.minute);
+      var west = Math.round((d - local) / 60000) * 60;
+      if (worst === null || west > worst) worst = west;
+    });
+    return worst;
+  }
+  var zones = [];
+  try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+  var cities = zones.map(function (z) { return {z: z, v: String(stdOffsetSeconds(z))}; });
+  function labelFor(v) { var o = offsets.filter(function (x) { return x.v === String(v); })[0]; return o ? o.label : ''; }
+  function clockAt(v) {
+    var d = new Date(Date.now() - Number(v) * 1000);
+    return d.toISOString().slice(11, 16);
+  }
+  function show() {
+    var v = sel.value;
+    q.value = labelFor(v);
+    now.textContent = clockAt(v) + ' there, before daylight saving';
+  }
+  function choose(v) {
+    if (String(sel.value) === String(v)) { list.hidden = true; show(); return; }
+    var before = sel.value;
+    sel.value = String(v);
+    show();
+    list.hidden = true;
+    var f = sel.form;
+    f._undo = function () { sel.value = before; show(); };
+    f.requestSubmit();
+  }
+  function render() {
+    var t = typed ? q.value.trim().toLowerCase().replace(/[−–]/g, '-') : '';
+    var rows = [];
+    offsets.forEach(function (o) { if (!t || o.label.toLowerCase().replace(/[−–]/g, '-').indexOf(t) >= 0) rows.push({text: o.label, v: o.v}); });
+    if (t) cities.forEach(function (c) {
+      if (c.z.toLowerCase().replace(/_/g, ' ').indexOf(t) >= 0 && labelFor(c.v)) rows.push({text: c.z.replace(/_/g, ' ') + ' \u00b7 ' + labelFor(c.v), v: c.v});
+    });
+    list.innerHTML = '';
+    rows.slice(0, 40).forEach(function (r) {
+      var li = document.createElement('li'); li.textContent = r.text;
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); choose(r.v); });
+      list.appendChild(li);
+    });
+    list.hidden = !rows.length;
+  }
+  var typed = false;
+  q.addEventListener('focus', function () { typed = false; q.select(); render(); });
+  q.addEventListener('input', function () { typed = true; render(); });
+  q.addEventListener('blur', function () { setTimeout(function () { list.hidden = true; show(); }, 100); });
+  q.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var first = list.querySelector('li'); if (first) first.dispatchEvent(new MouseEvent('mousedown')); } });
+  document.getElementById('tz-mine').addEventListener('click', function () {
+    var mine = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    choose(mine ? stdOffsetSeconds(mine) : Math.max(new Date(2026, 0, 1).getTimezoneOffset(), new Date(2026, 6, 1).getTimezoneOffset()) * 60);
+  });
+  show();
+  setInterval(show, 30000);
+})();
+</script>
 {{end}}

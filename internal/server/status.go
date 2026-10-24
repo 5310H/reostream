@@ -73,6 +73,8 @@ type StreamStatus struct {
 	LastFrameAgeSeconds float64 `json:"last_frame_age_seconds"`
 	AudioFrames         int     `json:"audio_frames"`
 	DroppedAudio        int     `json:"dropped_audio"`
+	// OnDemand is a battery camera's stream, asleep unless someone watches.
+	OnDemand bool `json:"on_demand,omitempty"`
 }
 
 // statusBody is the shape of GET /api/status.
@@ -123,8 +125,11 @@ func (s *Server) StreamStats() map[string]StreamStatus {
 		if sup, ok := bySup[name]; ok {
 			st.Connected = sup.Running
 			st.Restarts = sup.Restarts
+			st.OnDemand = sup.OnDemand
 			st.LastError = sup.LastError
-			// Report when the last error happened.
+			// Without an age beside it, the sentence in last_error reads as
+			// the present tense whatever its vintage: see
+			// supervisor.StreamStat.
 			if !sup.LastErrorAt.IsZero() {
 				st.LastErrorAgeSeconds = time.Since(sup.LastErrorAt).Seconds()
 			}

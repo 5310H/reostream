@@ -26,10 +26,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/VoltTech21/reostream/internal/config"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/VoltTech21/reostream/internal/cgi"
 )
@@ -170,6 +172,7 @@ func (s *Server) setNTPPrev(ctx context.Context, cam Camera, server string, enab
 	if err != nil {
 		return WriteResult{}, prevNTP{}, fmt.Errorf("control: connecting to %q for NTP: %w", cam.Name, err)
 	}
+	defer c.Close()
 	cur, err := readNTPDoc(ctx, c)
 	if err != nil {
 		return WriteResult{}, prevNTP{}, fmt.Errorf("control: reading NTP for %q before writing: %w", cam.Name, err)
@@ -185,6 +188,7 @@ func (s *Server) setNTP(ctx context.Context, cam Camera, server string, enabled 
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("control: connecting to %q for NTP: %w", cam.Name, err)
 	}
+	defer c.Close()
 
 	cur, err := readNTPDoc(ctx, c)
 	if err != nil {
@@ -266,6 +270,7 @@ func (s *Server) setTimeZone(ctx context.Context, cam Camera, tz int) (WriteResu
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("control: connecting to %q for the timezone: %w", cam.Name, err)
 	}
+	defer c.Close()
 
 	cur, err := readFullTime(ctx, c)
 	if err != nil {
@@ -313,6 +318,8 @@ func (s *Server) setTimeZone(ctx context.Context, cam Camera, tz int) (WriteResu
 type timePage struct {
 	Title  string
 	Camera Camera
+	// Head is the camera shell (camshell.go).
+	Head camHead
 
 	// Flash is the one-line report a write on this page left behind, or
 	// nil when this page was simply opened. See flash.go.
@@ -324,6 +331,19 @@ type timePage struct {
 
 	TimeZone    int
 	TimeZoneErr string
+
+	// ClockDrift is how far the camera's clock is from this machine's,
+	// for a person ("in sync", "2 min 10 s fast"); DailySync the fleet's
+	// daily sync time ("" off) and LastDailySync how its last run went.
+	// TwelveHour is the camera's clock format; HourFmtRead says it was read.
+	TwelveHour  bool
+	HourFmtRead bool
+	// DateFormat is the camera's timeFmt, DateFormats the choices.
+	DateFormat    string
+	DateFormats   []string
+	ClockDrift    string
+	DailySync     string
+	LastDailySync string
 
 	// TimeZoneLabel is TimeZone read the way a person reads a timezone,
 	// and TimeZoneChoices is the picker beside the raw field. See
@@ -362,6 +382,7 @@ type timePage struct {
 // page showing the value that failed to stick.
 func (s *Server) readTimePage(ctx context.Context, cam Camera) timePage {
 	page := timePage{Title: cam.Name + " time", Camera: cam, TimeZoneChoices: timeZoneChoices()}
+	page.Head = s.camHeadFor(ctx, cam, "settings", "time")
 
 	c, err := s.cgiDial(cam)
 	if err != nil {
@@ -369,6 +390,7 @@ func (s *Server) readTimePage(ctx context.Context, cam Camera) timePage {
 		page.TimeZoneErr = page.NTPErr
 		return page
 	}
+	defer c.Close()
 
 	if enabled, server, readErr := readNTP(ctx, c); readErr != nil {
 		page.NTPErr = fmt.Sprintf("could not read NTP: %v", readErr)
@@ -376,6 +398,22 @@ func (s *Server) readTimePage(ctx context.Context, cam Camera) timePage {
 		page.NTPServer = server
 		page.NTPEnabled = enabled
 	}
+
+	if cc, readErr := readCameraClock(ctx, c); readErr == nil {
+		page.ClockDrift = driftText(cc.drift(time.Now()))
+		if f, ok := cc.doc["hourFmt"].(float64); ok {
+			page.TwelveHour, page.HourFmtRead = f == 1, true
+		}
+		if f, ok := cc.doc["timeFmt"].(string); ok {
+			page.DateFormat, page.DateFormats = f, timeFormats
+		}
+	}
+	if cfg, err := config.Load(s.opts.ConfigPath); err == nil && cfg.Clock != nil {
+		page.DailySync = cfg.Clock.DailySync
+	}
+	dailySync.mu.Lock()
+	page.LastDailySync = dailySync.summary
+	dailySync.mu.Unlock()
 
 	if tz, readErr := readTimeZone(ctx, c); readErr != nil {
 		page.TimeZoneErr = fmt.Sprintf("could not read the timezone: %v", readErr)

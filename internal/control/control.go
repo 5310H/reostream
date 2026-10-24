@@ -9,14 +9,18 @@
 package control
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +41,7 @@ import (
 // renders with the wrong chrome. Any template added under templates/ must
 // be added to this list too.
 //
-//go:embed templates/password.html templates/accounts.html templates/blocks.html templates/claim.html templates/discover.html templates/camera.html templates/cameras.html templates/config.html templates/dashboard.html templates/flash.html templates/layout.html templates/login.html templates/logs.html templates/probe.html templates/result.html templates/setup.html templates/time.html templates/urls.html
+//go:embed templates/password.html templates/accounts.html templates/blocks.html templates/claim.html templates/discover.html templates/addfound.html templates/camera.html templates/camshell.html templates/appsettings.html templates/about.html templates/nvr.html templates/events.html templates/raw.html templates/recordings.html templates/cameras.html templates/config.html templates/dashboard.html templates/wall.html templates/flash.html templates/layout.html templates/login.html templates/logs.html templates/probe.html templates/result.html templates/setup.html templates/time.html templates/urls.html templates/view.html templates/align.html
 var templateFS embed.FS
 
 // Explicit, for the same reason the template list above is, plus one of
@@ -48,11 +52,52 @@ var templateFS embed.FS
 // before this was changed: a creds.toml placed in this directory was served
 // to an unauthenticated request with every test still green.
 //
-//go:embed assets/style.css assets/dashboard.js assets/settings.js assets/snapshot.js assets/mpegts.js assets/mpegts.js.LICENSE.txt assets/LICENSE-mpegts.txt assets/README.md
+//go:embed assets/style.css assets/dashboard.js assets/settings.js assets/snapshot.js assets/fisheye.js assets/fisheyeview.js assets/align.js assets/encoding.js assets/talk.js assets/live.js assets/rec.js assets/mpegts.js assets/mpegts.js.LICENSE.txt assets/LICENSE-mpegts.txt assets/README.md
 var assetFS embed.FS
 
 // assetSub drops the "assets" prefix so the URL and the file path match.
 var assetSub, _ = fs.Sub(assetFS, "assets")
+
+// assetETags maps each embedded asset to a hash of its bytes. The browser
+// may keep an asset in cache, but "no-cache" makes it revalidate the ETag
+// every time, so a new build -- with new CSS or JS -- is picked up at once
+// rather than hours later, while an unchanged file still answers 304 and is
+// not re-sent. Without this the embed FS has no modtime, so the browser
+// caches heuristically and shows a stale page after an update.
+var assetETags = func() map[string]string {
+	m := map[string]string{}
+	fs.WalkDir(assetSub, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if b, e := fs.ReadFile(assetSub, p); e == nil {
+			sum := sha256.Sum256(b)
+			m[p] = `"` + hex.EncodeToString(sum[:10]) + `"`
+		}
+		return nil
+	})
+	return m
+}()
+
+// serveAsset serves one embedded asset with a content ETag and revalidation,
+// so an updated build is never hidden behind a cached stylesheet.
+func serveAsset(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Path // already stripped of the /assets/ prefix
+	if name == "" || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := fs.ReadFile(assetSub, name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if et := assetETags[name]; et != "" {
+		w.Header().Set("ETag", et)
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
+}
 
 // cameraOf finds a field named Camera on whatever page data v is, and
 // returns it as a *Camera, or nil when the page has no such field. The
@@ -112,6 +157,9 @@ type Options struct {
 type Server struct {
 	opts Options
 	rend *webui.Renderer
+
+	// batteries is the last battery level each battery camera reported.
+	batteries batteryCache
 
 	// tmpl is the same template set as rend, kept separately for
 	// serveProbe, which renders a fragment for an HTMX-style swap and
@@ -234,16 +282,15 @@ type Server struct {
 	sweepPort int
 }
 
-// New builds the control server. It returns an error rather than panicking
-// on a template parse failure so a caller can report it cleanly, rather
-// than a process that has not opened a listener yet crashing outright.
-func New(opts Options) (*Server, error) {
-	// The sidebar needs the fleet on every page, not just the camera
-	// list's own, so it is a template function bound to this daemon's
-	// config path rather than a field every page struct would otherwise
-	// have to carry. A page that cannot read the config renders its
-	// sidebar without a fleet list rather than failing the whole render.
-	funcs := template.FuncMap{
+// templateFuncs is the function set every page is rendered with.
+//
+// The sidebar needs the fleet on every page, not just the camera list's
+// own, so it is a template function bound to this daemon's config path
+// rather than a field every page struct would otherwise have to carry. A
+// page that cannot read the config renders its sidebar without a fleet
+// list rather than failing the whole render.
+func templateFuncs(opts Options) template.FuncMap {
+	return template.FuncMap{
 		// railEntry, not Camera: Camera carries the password, and the rail
 		// needs only a name and a colour.
 		"fleet": func() []railEntry {
@@ -253,11 +300,20 @@ func New(opts Options) (*Server, error) {
 			}
 			return railEntries(cams, opts.Status)
 		},
-		"cameraOf": cameraOf,
-		"dict":     dict,
-		"streamOf": streamOf,
-		"version":  buildVersion,
+		"cameraOf":     cameraOf,
+		"dict":         dict,
+		"stateLabel":   stateLabel,
+		"paletteIndex": func() template.JS { return paletteIndex(opts.ConfigPath) },
+		"streamOf":     streamOf,
+		"version":      buildVersion,
 	}
+}
+
+// New builds the control server. It returns an error rather than panicking
+// on a template parse failure so a caller can report it cleanly, rather
+// than a process that has not opened a listener yet crashing outright.
+func New(opts Options) (*Server, error) {
+	funcs := templateFuncs(opts)
 	rend, err := webui.NewRenderer(templateFS, "templates/*.html", funcs)
 	if err != nil {
 		return nil, err
@@ -276,7 +332,7 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claim token: %w", err)
 	}
-	return &Server{
+	srv := &Server{
 		opts: opts,
 		rend: rend,
 		tmpl: tmpl,
@@ -292,7 +348,14 @@ func New(opts Options) (*Server, error) {
 		flashes:        make(map[string]flashEntry),
 		done:           make(chan struct{}),
 		inFlightProbes: make(map[string]bool),
-	}, nil
+	}
+	// The clip receiver, when the config has one.
+	if opts.ConfigPath != "" {
+		go srv.syncReceiver()
+		go srv.clockScheduler(context.Background())
+		go srv.syncRelay()
+	}
+	return srv, nil
 }
 
 // Close releases any handler waiting on the server's done channel. Safe to
@@ -350,6 +413,7 @@ var routePatterns = []string{
 	"GET /login",
 	"POST /login",
 	"GET /{$}",
+	"GET /wall",
 	"GET /logs",
 	"GET /logs/history",
 	"GET /logs/stream",
@@ -360,14 +424,48 @@ var routePatterns = []string{
 	"POST /logout",
 	"GET /cameras",
 	"POST /cameras/add",
+	"POST /cameras/{name}/remove",
 	"GET /cameras/{name}",
 	"POST /cameras/{name}/settings",
+	"GET /cameras/{name}/settings",
+	"GET /cameras/{name}/settings/{cat}",
+	"GET /settings",
+	"GET /settings/about",
+	"GET /settings/nvr",
+	"GET /settings/events",
+	"POST /settings/events",
+	"GET /settings/events/recent",
+	"POST /settings/nvr",
+	"POST /cameras/{name}/netport",
+	"POST /cameras/{name}/ptz",
+	"POST /cameras/{name}/copy",
+	"GET /cameras/{name}/raw",
+	"GET /cameras/{name}/recordings",
+	"GET /cameras/{name}/recordings/clip",
+	"GET /cameras/{name}/recordings/saved",
+	"POST /cameras/{name}/clips",
+	"POST /cameras/{name}/raw",
+	"POST /cameras/{name}/ptz/preset",
+	"POST /cameras/{name}/ptz/guard",
+	"POST /cameras/{name}/ptz/track",
+	"POST /cameras/{name}/ptz/calibrate",
+	"POST /cameras/{name}/ptz/guardpos",
 	"GET /cameras/{name}/osd",
 	"POST /cameras/{name}/floodlight",
 	"POST /cameras/{name}/fisheye",
+	"GET /cameras/{name}/view",
+	"POST /cameras/{name}/stitch",
+	"POST /cameras/{name}/encoding",
+	"POST /cameras/{name}/siren",
+	"GET /cameras/{name}/talk",
+	"GET /cameras/{name}/align",
 	"GET /cameras/{name}/time",
 	"POST /cameras/{name}/time",
 	"POST /cameras/{name}/timezone",
+	"POST /cameras/{name}/time/sync",
+	"POST /cameras/{name}/time/daily",
+	"POST /cameras/{name}/time/hourfmt",
+	"POST /cameras/{name}/time/datefmt",
 	"GET /cameras/{name}/accounts",
 	"GET /cameras/{name}/advanced",
 	"POST /cameras/{name}/write/{id}",
@@ -375,6 +473,8 @@ var routePatterns = []string{
 	"GET /setup/urls",
 	"POST /setup/probe",
 	"POST /setup/discover",
+	"POST /setup/identify",
+	"POST /setup/add-found",
 	"GET /assets/",
 	"GET /stream/",
 }
@@ -402,6 +502,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /login", s.serveLoginForm)
 	mux.HandleFunc("POST /login", s.serveLogin)
 	mux.Handle("GET /{$}", s.wrap(http.HandlerFunc(s.serveDashboard)))
+	mux.Handle("GET /wall", s.wrap(http.HandlerFunc(s.serveWall)))
+	mux.Handle("GET /settings", s.wrap(http.HandlerFunc(s.serveSettingsIndex)))
+	mux.Handle("GET /settings/about", s.wrap(http.HandlerFunc(s.serveAbout)))
+	mux.Handle("GET /settings/nvr", s.wrap(http.HandlerFunc(s.serveNVR)))
+	mux.Handle("GET /settings/events", s.wrap(http.HandlerFunc(s.serveEventsPage)))
+	mux.Handle("POST /settings/events", s.wrap(http.HandlerFunc(s.saveEventsPage)))
+	mux.Handle("GET /settings/events/recent", s.wrap(http.HandlerFunc(s.serveRecentEvents)))
+	mux.Handle("POST /settings/nvr", s.wrap(http.HandlerFunc(s.serveNVR)))
 	mux.Handle("GET /password", s.wrap(http.HandlerFunc(s.servePasswordPage)))
 	mux.Handle("POST /password", s.wrap(http.HandlerFunc(s.serveApplyPassword)))
 	mux.Handle("POST /logout", s.wrap(http.HandlerFunc(s.serveLogout)))
@@ -412,8 +520,25 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /config", s.wrap(http.HandlerFunc(s.saveConfigPage)))
 	mux.Handle("GET /cameras", s.wrap(http.HandlerFunc(s.serveCameras)))
 	mux.Handle("POST /cameras/add", s.wrap(http.HandlerFunc(s.saveCamera)))
+	mux.Handle("POST /cameras/{name}/remove", s.wrap(http.HandlerFunc(s.serveRemoveCamera)))
 	mux.Handle("GET /cameras/{name}", s.wrap(http.HandlerFunc(s.serveCamera)))
 	mux.Handle("POST /cameras/{name}/settings", s.wrap(http.HandlerFunc(s.serveApplySetting)))
+	mux.Handle("GET /cameras/{name}/settings", s.wrap(http.HandlerFunc(s.serveCameraSettingsIndex)))
+	mux.Handle("GET /cameras/{name}/settings/{cat}", s.wrap(http.HandlerFunc(s.serveCameraSettings)))
+	mux.Handle("POST /cameras/{name}/netport", s.wrap(http.HandlerFunc(s.serveApplyNetPort)))
+	mux.Handle("POST /cameras/{name}/ptz", s.wrap(http.HandlerFunc(s.serveApplyPtz)))
+	mux.Handle("POST /cameras/{name}/copy", s.wrap(http.HandlerFunc(s.serveCopySection)))
+	mux.Handle("GET /cameras/{name}/raw", s.wrap(http.HandlerFunc(s.serveRawValues)))
+	mux.Handle("GET /cameras/{name}/recordings", s.wrap(http.HandlerFunc(s.serveRecordings)))
+	mux.Handle("GET /cameras/{name}/recordings/clip", s.wrap(http.HandlerFunc(s.serveRecordingClip)))
+	mux.Handle("GET /cameras/{name}/recordings/saved", s.wrap(http.HandlerFunc(s.serveSavedClip)))
+	mux.Handle("POST /cameras/{name}/clips", s.wrap(http.HandlerFunc(s.serveApplyClips)))
+	mux.Handle("POST /cameras/{name}/raw", s.wrap(http.HandlerFunc(s.serveApplyRawValue)))
+	mux.Handle("POST /cameras/{name}/ptz/preset", s.wrap(http.HandlerFunc(s.serveApplyPreset)))
+	mux.Handle("POST /cameras/{name}/ptz/guard", s.wrap(http.HandlerFunc(s.serveApplyGuard)))
+	mux.Handle("POST /cameras/{name}/ptz/track", s.wrap(http.HandlerFunc(s.serveApplyAutoTrack)))
+	mux.Handle("POST /cameras/{name}/ptz/calibrate", s.wrap(http.HandlerFunc(s.serveCalibrate)))
+	mux.Handle("POST /cameras/{name}/ptz/guardpos", s.wrap(http.HandlerFunc(s.serveGuardPosition)))
 	// Read only, and the status page's toggles are the only caller. Writing
 	// them still goes through POST /cameras/{name}/settings above: that
 	// handler carries the read-modify-write discipline (read the camera's
@@ -422,9 +547,19 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /cameras/{name}/osd", s.wrap(http.HandlerFunc(s.serveOSD)))
 	mux.Handle("POST /cameras/{name}/floodlight", s.wrap(http.HandlerFunc(s.serveApplyFloodlight)))
 	mux.Handle("POST /cameras/{name}/fisheye", s.wrap(http.HandlerFunc(s.serveApplyFisheye)))
+	mux.Handle("GET /cameras/{name}/view", s.wrap(http.HandlerFunc(s.serveFisheyeView)))
+	mux.Handle("POST /cameras/{name}/stitch", s.wrap(http.HandlerFunc(s.serveApplyStitch)))
+	mux.Handle("POST /cameras/{name}/encoding", s.wrap(http.HandlerFunc(s.serveApplyEncoding)))
+	mux.Handle("POST /cameras/{name}/siren", s.wrap(http.HandlerFunc(s.serveApplySiren)))
+	mux.Handle("GET /cameras/{name}/talk", s.wrap(http.HandlerFunc(s.serveTalk)))
+	mux.Handle("GET /cameras/{name}/align", s.wrap(http.HandlerFunc(s.serveAlign)))
 	mux.Handle("GET /cameras/{name}/time", s.wrap(http.HandlerFunc(s.serveTime)))
 	mux.Handle("POST /cameras/{name}/time", s.wrap(http.HandlerFunc(s.serveApplyTime)))
 	mux.Handle("POST /cameras/{name}/timezone", s.wrap(http.HandlerFunc(s.serveApplyTimezone)))
+	mux.Handle("POST /cameras/{name}/time/sync", s.wrap(http.HandlerFunc(s.serveSyncClock)))
+	mux.Handle("POST /cameras/{name}/time/daily", s.wrap(http.HandlerFunc(s.serveDailySync)))
+	mux.Handle("POST /cameras/{name}/time/hourfmt", s.wrap(http.HandlerFunc(s.serveHourFormat)))
+	mux.Handle("POST /cameras/{name}/time/datefmt", s.wrap(http.HandlerFunc(s.serveDateFormat)))
 	// Accounts get a GET route only. No POST, PUT, PATCH or DELETE route
 	// exists for /cameras/{name}/accounts anywhere in this package; see
 	// accounts.go's top comment for why. Go's ServeMux answers 405 for a
@@ -437,10 +572,17 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /setup", s.wrap(http.HandlerFunc(s.serveSetup)))
 	mux.Handle("GET /setup/urls", s.wrap(http.HandlerFunc(s.serveURLs)))
 	mux.Handle("POST /setup/probe", s.wrap(http.HandlerFunc(s.serveProbe)))
-	// Never a GET, and never run on its own: this opens a TCP connection
-	// to every address in a /24, which is a thing a person chooses to do
-	// to their own network, not something a page does because it loaded.
+	// Never a GET: this opens a TCP connection to every address in a /24,
+	// so it is a POST with a body, not something reachable by navigating or
+	// prefetching a link. The setup page does fire it on load, but only at
+	// the subnets this install can show are the operator's own -- the one
+	// its browser is on, and the ones its cameras are already on -- never a
+	// range nobody named.
 	mux.Handle("POST /setup/discover", s.wrap(http.HandlerFunc(s.serveDiscover)))
+	// One camera, re-probed with a password typed into its own field after
+	// the credential-free scan could not read it.
+	mux.Handle("POST /setup/identify", s.wrap(http.HandlerFunc(s.serveIdentify)))
+	mux.Handle("POST /setup/add-found", s.wrap(http.HandlerFunc(s.serveAddFound)))
 	// Assets are served WITHOUT auth, deliberately, and it is the one
 	// route on this page that is. Behind s.wrap the stylesheet request
 	// itself answered 303 /login, so the login screen -- the page an
@@ -455,7 +597,7 @@ func (s *Server) Handler() http.Handler {
 	// every install, and they are already in the published image. Any
 	// file added there has to hold to that.
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/",
-		http.FileServer(http.FS(assetSub))))
+		http.HandlerFunc(serveAsset)))
 	// The live tiles need to fetch MPEG-TS from the same origin as this
 	// page: mpegts.js pulls the stream over XHR, the streaming listener is
 	// a different port and therefore a different origin, and that listener
@@ -466,7 +608,7 @@ func (s *Server) Handler() http.Handler {
 	// streaming listener or duplicating how it serves a hub. See
 	// internal/control/tiles.go for the URLs this produces.
 	if s.opts.Hubs != nil {
-		streamSrv := server.New(s.opts.Hubs)
+		streamSrv := server.New(s.opts.Hubs).AllowWake()
 		mux.Handle("GET /stream/", s.wrap(http.StripPrefix("/stream", streamSrv.StreamHandler())))
 	}
 	return s.claimGate(mux)
@@ -530,4 +672,23 @@ func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
 		Toggles      []Field
 		Flash        *Flash
 	}{Title: "Status", Cards: cards, Alerts: alerts(cards), HealthyCount: healthyCount(cards), Toggles: toggles, Flash: s.takeFlash(r)})
+}
+
+// serveWall is the redesign's Wall: every camera's tile in one dense grid,
+// no per-camera chrome. It reuses the dashboard's own card data, so a camera
+// is in exactly the state the Fleet shows it.
+func (s *Server) serveWall(w http.ResponseWriter, r *http.Request) {
+	cfg, err := config.LoadRaw(s.opts.ConfigPath)
+	if (err == nil && len(cfg.Cameras) == 0) || errors.Is(err, fs.ErrNotExist) {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	var urls RecorderURLs
+	if err == nil {
+		urls = recorderURLs(cfg, hostOnly(r.Host))
+	}
+	s.render(w, "wall.html", struct {
+		Title string
+		Cards []statusCard
+	}{Title: "Wall", Cards: s.statusCards(urls)})
 }

@@ -269,13 +269,17 @@ func (w *Writer) writeParts(h Header, xmlPart, binPart []byte, sealBin bool) err
 	}
 	h.PayloadOff = uint32(len(out))
 	h.MsgLen = uint32(len(out) + len(binPart))
-	if _, err := w.w.Write(h.Encode()); err != nil {
-		return err
+	return w.send(h, out, binPart)
+}
+
+// send writes a whole message in one Write, so messages from concurrent
+// writers never interleave on the wire.
+func (w *Writer) send(h Header, parts ...[]byte) error {
+	b := h.Encode()
+	for _, p := range parts {
+		b = append(b, p...)
 	}
-	if _, err := w.w.Write(out); err != nil {
-		return err
-	}
-	_, err = w.w.Write(binPart)
+	_, err := w.w.Write(b)
 	return err
 }
 
@@ -304,12 +308,5 @@ func (w *Writer) Write(h Header, body []byte) error {
 		}
 	}
 	h.MsgLen = uint32(len(out))
-	if _, err := w.w.Write(h.Encode()); err != nil {
-		return err
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	_, err := w.w.Write(out)
-	return err
+	return w.send(h, out)
 }

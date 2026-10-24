@@ -87,8 +87,15 @@ func TestClockHandlesRepeatedWraps(t *testing.T) {
 }
 
 func TestClockResumesAfterTheCameraRestarts(t *testing.T) {
-	// After a reboot the camera clock restarts near zero. PTS should carry
-	// on from the last value plus the outage.
+	// A rebooted camera starts its clock over from a small value. Seen by
+	// the wrap detector that is either a backward step too small to be a
+	// wrap, which clamps every frame to the last PTS until the new clock
+	// catches up (up to 35 minutes frozen), or a step big enough to be
+	// counted as one, which throws the PTS forward by up to 71 minutes.
+	// Neither is a timestamp a reader can follow. Resume tells the clock the
+	// connection was re-established: the next reading is a new base and the
+	// timeline carries on from where it was, plus the real length of the
+	// outage, so a recorder sees the gap as a gap and not as a seek.
 	c := NewClock()
 	c.PTS(200_000_000)
 	last := c.PTS(260_000_000) // 60s streamed: 5,400,000 ticks

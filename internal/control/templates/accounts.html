@@ -5,15 +5,7 @@
   ONLY tag is what the reader actually needs at a glance.
 */}}
 {{define "body"}}
-<h1>{{.Camera.Name}}</h1>
-<p class="subtitle">{{.Camera.Address}}</p>
-
-<nav class="tabs">
-<a href="/cameras/{{.Camera.Name}}">Overview</a>
-<a href="/cameras/{{.Camera.Name}}/advanced">Advanced</a>
-<a href="/cameras/{{.Camera.Name}}/time">Time</a>
-<a href="/cameras/{{.Camera.Name}}/accounts" aria-current="page">Accounts</a>
-</nav>
+{{template "camsettings-open" .Head}}
 
 <section>
 <div style="display:flex;align-items:baseline;gap:8px">
@@ -29,4 +21,5 @@
 <pre class="doc">{{.XML}}</pre>
 {{end}}
 </section>
+{{template "camsettings-close"}}
 {{end}}

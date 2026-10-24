@@ -1,0 +1,50 @@
+{{define "body"}}
+{{template "appsettings-open" "events"}}
+{{template "flash" .Flash}}
+<section>
+<div class="sec-head"><h2>Camera alerts</h2></div>
+<p class="hint">Each camera's own motion, person, vehicle and animal detections, sent the moment they happen.</p>
+<form method="post" action="/settings/events" class="events-form">
+<label class="field"><span class="label">MQTT broker{{template "info" "host:port. Topics: prefix/camera/motion, /person, /vehicle, /animal (ON or OFF, retained) and prefix/camera/event (JSON)."}}</span><input type="text" name="mqtt" value="{{.Events.MQTT}}" placeholder="192.168.1.10:1883"></label>
+<div class="events-row">
+<label class="field"><span class="label">MQTT user</span><input type="text" name="mqtt_user" value="{{.Events.MQTTUser}}" autocomplete="off"></label>
+<label class="field"><span class="label">MQTT password</span><input type="password" name="mqtt_password" value="" placeholder="{{if .Events.MQTTPassword}}unchanged{{end}}" autocomplete="new-password"></label>
+<label class="field"><span class="label">Topic prefix</span><input type="text" name="prefix" value="{{.Events.Prefix}}" placeholder="reostream"></label>
+</div>
+<label class="field"><span class="label">Frigate{{template "info" "An object the camera sees becomes a Frigate event, with its recording, on the camera of the same name."}}</span><input type="text" name="frigate" value="{{.Events.Frigate}}" placeholder="http://192.168.1.10:5000"></label>
+<label class="every"><input type="checkbox" name="frigate_motion" value="1"{{if .Events.FrigateMotion}} checked{{end}}> Also send plain motion to Frigate</label>
+<div class="buttonrow"><button type="submit">Save</button></div>
+</form>
+</section>
+<section>
+<div class="sec-head"><h2>Recent</h2></div>
+<ol class="ev-list" id="ev-list"><li class="hint">Nothing yet.</li></ol>
+</section>
+{{template "appsettings-close"}}
+<script>
+(function () {
+  var list = document.getElementById('ev-list');
+  function draw(evs) {
+    if (!evs || !evs.length) return;
+    list.innerHTML = '';
+    evs.slice().reverse().slice(0, 60).forEach(function (e) {
+      var li = document.createElement('li');
+      li.className = 'ev ' + (e.on ? 'on' : 'off');
+      var t = new Date(e.time);
+      li.innerHTML = '<span class="mono"></span><b></b><span class="kd"></span><span></span><span class="dim"></span>';
+      li.children[0].textContent = t.toLocaleTimeString();
+      li.children[1].textContent = e.camera;
+      li.children[2].className = 'kd kind-' + (e.kind === 'person' ? 'people' : e.kind);
+      li.children[3].textContent = e.kind + (e.on ? '' : ' ended');
+      li.children[4].textContent = e.note || '';
+      list.appendChild(li);
+    });
+  }
+  function poll() {
+    fetch('/settings/events/recent', {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(draw).catch(function () {});
+  }
+  poll();
+  setInterval(poll, 3000);
+})();
+</script>
+{{end}}

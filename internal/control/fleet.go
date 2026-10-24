@@ -18,6 +18,8 @@ type Camera struct {
 	Username string
 	Password string
 	Channel  int
+	// UID marks a battery camera, reached over UDP.
+	UID string
 }
 
 // fleet reads the camera list from reostream's config.
@@ -56,7 +58,7 @@ func loadFleet(configPath string) ([]Camera, error) {
 		out = append(out, Camera{
 			Name: c.Name, Address: c.Address,
 			Username: c.Username, Password: c.Password,
-			Channel: c.Channel,
+			Channel: c.Channel, UID: c.UID,
 		})
 	}
 	return out, nil

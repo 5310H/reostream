@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
+	"github.com/VoltTech21/reostream/internal/bcudp"
 )
 
 func main() {
@@ -22,9 +23,32 @@ func main() {
 	pass := flag.String("password", "", "password")
 	stream := flag.String("stream", "main", "main, sub or extern")
 	seconds := flag.Int("seconds", 0, "stop after this many seconds, 0 for no limit")
+	uid := flag.String("uid", "", "battery camera UID; connects over UDP instead of TCP 9000")
+	search := flag.Bool("search", false, "only ask a battery camera whether it is asleep, then exit; without -address, broadcast for every battery camera")
 	dump := flag.String("dump-payload", "", "also write the raw reassembled media payload here, for protocol work")
 	flag.Parse()
 
+	if *search {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		var found []bcudp.Info
+		var err error
+		if *addr == "" {
+			found, err = bcudp.Discover(ctx)
+		} else {
+			var info bcudp.Info
+			info, err = bcudp.Search(ctx, *addr)
+			found = append(found, info)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bcprobe: %v\n", err)
+			os.Exit(1)
+		}
+		for _, info := range found {
+			fmt.Fprintf(os.Stderr, "bcprobe: %s uid %s asleep=%v battery=%d\n", info.Addr, info.UID, info.Asleep, info.Battery)
+		}
+		return
+	}
 	if *addr == "" {
 		fmt.Fprintln(os.Stderr, "bcprobe: --address is required")
 		os.Exit(2)
@@ -39,7 +63,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	conn, err := baichuan.Dial(ctx, *addr, baichuan.Options{Username: *user, Password: *pass})
+	conn, err := baichuan.Dial(ctx, *addr, baichuan.Options{Username: *user, Password: *pass, UID: *uid})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bcprobe: %v\n", err)
 		os.Exit(1)

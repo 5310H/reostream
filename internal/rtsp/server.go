@@ -70,7 +70,15 @@ func New(listen string) *Server {
 // drop-on-full by design, but a reader falling behind is worth knowing,
 // so this counts them and says so once a minute per session.
 func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErrorCtx) {
-	// Log which reader is falling behind. The session can be nil here.
+	// Who is reading. Naming them is the difference between "a reader is
+	// not keeping up" and knowing which one: on 2026-10-16 the fisheye path
+	// dropped about 3,800 packets roughly every 72 minutes, and answering
+	// "which reader" meant instrumenting the recorder from the outside,
+	// because this line did not say.
+	//
+	// Every lookup here is guarded. gortsplib calls this with no session at
+	// all when the write failed before one was established, which is what
+	// the handler already had to survive.
 	reader := "unknown reader"
 	if ctx.Session != nil {
 		if conns := ctx.Session.Conns(); len(conns) > 0 && conns[0] != nil {
@@ -95,7 +103,8 @@ func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErr
 			}
 		}
 	}
-	// Fall back to the session's own path.
+	// A session that is not in the map still knows its own path, which is
+	// better than reporting "?" about a real reader.
 	if path == "?" && ctx.Session != nil {
 		if p := ctx.Session.Path(); p != "" {
 			path = p
@@ -104,7 +113,8 @@ func (s *Server) OnStreamWriteError(ctx *gortsplib.ServerHandlerOnStreamWriteErr
 	if s.drops == nil {
 		s.drops = make(map[string]*dropCount)
 	}
-	// Per reader, not just per path.
+	// Keyed by reader as well as path, so two readers of one path are not
+	// averaged into a single number that blames neither.
 	key := path + " " + reader
 	d, ok := s.drops[key]
 	if !ok {

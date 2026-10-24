@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/VoltTech21/reostream/internal/ts"
 	"io"
 	"os"
 	"strconv"
@@ -35,6 +36,11 @@ Commands:
   abilities              what the logged in user may read and write
   get NAME               print one configuration block as the camera sends it
   get all                try every known block and report which the camera has
+  getid N                print one message by its number
+  alarms [SECONDS]       print the camera's alarm events as they arrive
+  sddays                 days this month and last with SD recordings
+  sdfiles YYYY-MM-DD     the recordings that day
+  sdclip START END OUT.ts [main]  save a recording (times as 2006-01-02T15:04:05)
   snap [main|sub] FILE   save a still image
   talk FILE              play raw 16 bit mono PCM through the camera speaker
   talkinfo               report the two-way audio formats the camera accepts
@@ -48,12 +54,20 @@ func main() {
 	addr := flag.String("address", "", "camera address")
 	user := flag.String("username", "admin", "username")
 	pass := flag.String("password", "", "password")
+	uid := flag.String("uid", "", "battery camera UID; connects over UDP")
 	withVideo := flag.String("with-video", "", "open this video stream first: main, sub or extern")
 	noConfig := flag.Bool("no-config", false, "skip TalkConfig and send audio into an existing session")
 	talkRate = flag.Int("rate", 16000, "sample rate of the raw PCM file talk plays")
 	hb2 := flag.Bool("hb-twopart", false, "send the heartbeat as an extension plus a body")
 	flag.Usage = usage
 	flag.Parse()
+
+	// The password may come from the environment instead of the command
+	// line, so it never has to appear in a shell history, a process list or
+	// a log. -password still wins when given.
+	if *pass == "" {
+		*pass = os.Getenv("CAM_PW")
+	}
 
 	if *addr == "" || flag.NArg() == 0 {
 		usage()
@@ -70,7 +84,7 @@ func main() {
 	// Some messages make a camera hang up rather than answer, so a sweep has
 	// to be able to start a fresh connection partway through.
 	dial := func() (*baichuan.Conn, error) {
-		return baichuan.Dial(ctx, *addr, baichuan.Options{Username: *user, Password: *pass})
+		return baichuan.Dial(ctx, *addr, baichuan.Options{Username: *user, Password: *pass, UID: *uid})
 	}
 	conn, err := dial()
 	if err != nil {
@@ -88,6 +102,16 @@ func main() {
 		err = abilities(conn)
 	case "get":
 		err = get(conn, dial, flag.Args()[1:])
+	case "getid":
+		err = getID(conn, flag.Args()[1:])
+	case "alarms":
+		err = alarms(conn, flag.Args()[1:])
+	case "sddays":
+		err = sdDays(conn)
+	case "sdfiles":
+		err = sdFiles(conn, flag.Args()[1:])
+	case "sdclip":
+		err = sdClip(conn, flag.Args()[1:])
 	case "set":
 		err = set(conn, flag.Args()[1:])
 	case "snap":
@@ -367,6 +391,112 @@ func abilities(conn *baichuan.Conn) error {
 // also the cheapest survey of what a model supports, and unlike the ability
 // lists it reports what the camera will actually do rather than what it
 // claims.
+func alarms(conn *baichuan.Conn, args []string) error {
+	secs := 60
+	if len(args) == 1 {
+		secs, _ = strconv.Atoi(args[0])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(secs)*time.Second)
+	defer cancel()
+	if err := conn.StartAlarms(ctx); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case m, ok := <-conn.Messages():
+			if !ok {
+				return conn.Err()
+			}
+			if !baichuan.IsAlarmEvent(m) {
+				continue
+			}
+			fmt.Printf("%s %s\n", time.Now().Format("15:04:05"), strings.Join(strings.Fields(string(m.XML)), " "))
+		}
+	}
+}
+
+func sdDays(conn *baichuan.Conn) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	now := time.Now()
+	for _, m := range []time.Time{now.AddDate(0, -1, 0), now} {
+		days, err := conn.RecordDays(ctx, m)
+		if err != nil {
+			return err
+		}
+		for _, d := range days {
+			fmt.Println(d.Format("2006-01-02"))
+		}
+	}
+	return nil
+}
+
+func sdFiles(conn *baichuan.Conn, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: sdfiles YYYY-MM-DD")
+	}
+	day, err := time.ParseInLocation("2006-01-02", args[0], time.Local)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	files, err := conn.RecordFiles(ctx, day)
+	for _, f := range files {
+		fmt.Printf("%s  %s-%s  %-6s %7d kB audio=%v sub=%v\n", f.Name, f.Start.Format("15:04:05"), f.End.Format("15:04:05"), f.Type, f.Size/1024, f.HasAudio, f.HasSub)
+	}
+	return err
+}
+
+func sdClip(conn *baichuan.Conn, args []string) error {
+	if len(args) < 3 {
+		return fmt.Errorf("usage: sdclip START END OUT.ts [main]")
+	}
+	from, err := time.ParseInLocation("2006-01-02T15:04:05", args[0], time.Local)
+	if err != nil {
+		return err
+	}
+	to, err := time.ParseInLocation("2006-01-02T15:04:05", args[1], time.Local)
+	if err != nil {
+		return err
+	}
+	out, err := os.Create(args[2])
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	sub := !(len(args) > 3 && args[3] == "main")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	rw := ts.NewRecordingWriter(out, true)
+	n := 0
+	end, err := conn.Download(ctx, from, to, sub, 4*time.Second, func(f baichuan.Frame) error { n++; return rw.Write(f) })
+	fmt.Fprintf(os.Stderr, "%d frames, %s\n", n, end)
+	return err
+}
+
+// getID reads one message by its number, for messages with no block name.
+func getID(conn *baichuan.Conn, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: getid N")
+	}
+	id, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		return fmt.Errorf("getid: %q is not a message number", args[0])
+	}
+	xml, status, err := fetch(conn, uint32(id))
+	if err != nil {
+		return err
+	}
+	if status != 200 && status != 0 {
+		return fmt.Errorf("camera answered status %d", status)
+	}
+	fmt.Printf("%s\n", xml)
+	return nil
+}
+
 func get(conn *baichuan.Conn, dial func() (*baichuan.Conn, error), args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: get NAME|all\n  names: %s", strings.Join(baichuan.ConfigNames(), " "))
@@ -519,7 +649,10 @@ func fisheye(addr, user, pass string, args []string) error {
 		fmt.Printf("imageType     %d  %s\n", int(f.ImageType), f.ImageType)
 		fmt.Printf("installType   %d\n", f.InstallType)
 		fmt.Printf("rotationAngle %d\n", f.RotationAngle)
-		// Also print the raw value and range the camera reports.
+		// The camera's own answer about what it accepts. Every name this
+		// program prints for a mode is this repository's guess, taken from
+		// what the picture looked like; the range below is the camera's,
+		// and it is the only thing that says how many modes there are.
 		value, initial, rng, err := c.Get(context.Background(), "GetFishEye", 0)
 		if err == nil {
 			fmt.Printf("\nvalue   %s\n", value)

@@ -17,7 +17,7 @@ import (
 	"github.com/VoltTech21/reostream/internal/cgi"
 )
 
-// TestApplyAllReportsEveryCameraSeparately is the brief's test verbatim.
+// TestApplyAllReportsEveryCameraSeparately:
 //
 // Eight cameras are eight independent outcomes and partial success is the
 // normal case, not an error: the fisheye and the dual lens model disagree
@@ -54,7 +54,7 @@ func TestApplyAllReportsEveryCameraSeparately(t *testing.T) {
 	}
 }
 
-// TestApplyAllDoesNotStopAtTheFirstFailure is the brief's test verbatim.
+// TestApplyAllDoesNotStopAtTheFirstFailure:
 //
 // A camera that is unreachable must not prevent the rest being set.
 func TestApplyAllDoesNotStopAtTheFirstFailure(t *testing.T) {
@@ -202,6 +202,11 @@ func newFakeClockCamera(t *testing.T, enable int, server string, timeZone int) *
 			}
 			atomic.AddInt32(&f.timeSets, 1)
 			w.Write([]byte(`[{"cmd":"SetTime","code":0}]`))
+		// A real camera answers Logout, and every handler that dials a
+		// client now hands the session back -- see cgi.Client.Close and
+		// the exhaustion it exists to prevent.
+		case "Logout":
+			w.Write([]byte(`[{"cmd":"Logout","code":0,"value":{"rspCode":200}}]`))
 		default:
 			t.Errorf("unexpected cmd %q", r.URL.Query().Get("cmd"))
 		}

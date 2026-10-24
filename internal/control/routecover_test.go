@@ -44,6 +44,11 @@ func TestNoRouteEscapesTheAuthWrapper(t *testing.T) {
 		path = strings.ReplaceAll(path, "{name}", "one")
 		path = strings.ReplaceAll(path, "{id}", "45")
 		path = strings.ReplaceAll(path, "{$}", "")
+		path = strings.ReplaceAll(path, "{cat}", "image")
+		// /assets/ is a prefix; the folder itself is not listed, a file is.
+		if path == "/assets/" {
+			path = "/assets/style.css"
+		}
 
 		t.Run(pattern, func(t *testing.T) {
 			req, err := http.NewRequest(method, ts.URL+path, nil)
@@ -100,6 +105,11 @@ func TestTheRouteListMatchesTheRouter(t *testing.T) {
 		path = strings.ReplaceAll(path, "{name}", "one")
 		path = strings.ReplaceAll(path, "{id}", "45")
 		path = strings.ReplaceAll(path, "{$}", "")
+		path = strings.ReplaceAll(path, "{cat}", "image")
+		// /assets/ is a prefix; the folder itself is not listed, a file is.
+		if path == "/assets/" {
+			path = "/assets/style.css"
+		}
 
 		req, err := http.NewRequest(method, ts.URL+path, nil)
 		if err != nil {

@@ -192,6 +192,21 @@ func newCGIFloodlightCamera(t *testing.T, mode, state int) *cgiFloodlightCamera 
 			// camera reports a command it does not support, which offers
 			// no resets and is all these tests need.
 			w.Write([]byte(`[{"cmd":"` + r.URL.Query().Get("cmd") + `","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
+		// A real camera answers Logout, and every handler that dials a
+		// client now hands the session back -- see cgi.Client.Close and
+		// the exhaustion it exists to prevent.
+		case "Logout":
+			w.Write([]byte(`[{"cmd":"Logout","code":0,"value":{"rspCode":200}}]`))
+		// The camera page reads the encoder settings on this session too.
+		// Answered the way a camera that does not implement it replies,
+		// which is what leaves the Encoding section unrendered.
+		case "GetEnc":
+			w.Write([]byte(`[{"cmd":"GetEnc","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
+		// The camera page reads the speaker on this session too. Answered
+		// the way a camera without one replies, which is what leaves the
+		// Sound section unrendered.
+		case "GetAudioCfg", "GetAudioAlarmV20", "GetIsp", "GetAiCfg":
+			w.Write([]byte(`[{"cmd":"` + r.URL.Query().Get("cmd") + `","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
 		default:
 			t.Errorf("cgiFloodlightCamera: unexpected cmd %q", r.URL.Query().Get("cmd"))
 		}
@@ -218,85 +233,10 @@ func pairGetID(t *testing.T, name string) uint32 {
 	return 0
 }
 
-// TestCameraPageShowsAllSixCombinedProperties is the regression test for
-// the merged camera page (camerapage.go, camera.html): one camera, one
-// page, carrying its stream state, its bitrate, a playable video tile, its
-// curated settings, its floodlight control, and a link to its raw
-// protocol blocks, all at once. A future edit that silently drops any one
-// of them must fail here.
-//
-// Reaching the page's populated branches, rather than its empty ones,
-// needs three doubles: a fakecam that actually answers the Baichuan
-// probe sweep and the curated settings reads (Dial), a minimal CGI double
-// that actually answers GetWhiteLed (CGIDial), and a Hubs source
-// reporting a browser-playable H.264 codec on this camera's sub stream, so
-// cameraGroupFor's Tile is playable rather than the dashboard's own
-// zero-value "not playable" default.
-func TestCameraPageShowsAllSixCombinedProperties(t *testing.T) {
-	fixture, _ := buildProbeFixture(t)
-	key := baichuan.AESKey(testProbeNonce, "")
-
-	// Real per-field documents, shaped like the RLC-810A fixtures
-	// settings_test.go already verifies groups()'s curated XPaths against
-	// (testdata/livefixtures/osd2.xml, isp.xml, led.xml), not an invented
-	// shape: an XPath this camera does not actually carry would leave the
-	// field unavailable rather than seeded, exactly the failure this test
-	// exists to catch.
-	// topLeftX/topLeftY are in the real capture on every camera this
-	// project has read, and the two overlay position controls are seeded
-	// from them; a fixture without them would render those controls
-	// unavailable for a reason no real camera has.
-	osdXML := testXMLHeader + `<body><OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName><OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>1</topLeftX><topLeftY>1</topLeftY></OsdDatetime></body>`
-	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight></InputAdvanceCfg></body>`
-	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state></LedState></body>`
-	abilityXML := testXMLHeader + `<body><AbilityInfo version="1.1"><userName>admin</userName></AbilityInfo></body>`
-
-	// Support/Abilities (the section above Settings) are not one of this
-	// test's six pinned properties, but GetAbilities waits out its own
-	// 40 second phase timeout if message 151 never arrives at all, since
-	// fakecam never closes its write side after replaying a fixture; a
-	// cheap reply here is what keeps this test from actually costing 40
-	// real seconds over something it never asserts on.
-	fixture = append(fixture, statusReply(t, key, baichuan.MsgIDAbilityInfo, 200, abilityXML)...)
-	probeCam := fakecam.New(t, fixture)
-
-	// The curated settings read (resolveGroupBlock, called once per group
-	// in groups() order: Camera name and overlay, Image, Lights and IR)
-	// runs on its own, later connection, and reads exactly these three
-	// blocks, in this order. It cannot share probeCam's fixture: a Conn
-	// reads a connection's bytes strictly forward and never rewinds, so
-	// once the earlier support/probe phases (or a mismatched request
-	// order) have scanned past a message looking for something else, it
-	// is gone for the rest of that connection. A fresh, minimal,
-	// correctly-ordered fixture on its own connection sidesteps that
-	// entirely, the same way settings_test.go's own
-	// TestServeSettingsRendersTheCuratedFieldsSeededFromTheCamera does.
-	settingsFixture := loginHandshake(testProbeNonce, testProbeDeviceInfo)
-	settingsFixture = append(settingsFixture, statusReply(t, key, pairGetID(t, "osd get"), 200, osdXML)...)
-	settingsFixture = append(settingsFixture, statusReply(t, key, pairGetID(t, "isp get"), 200, ispXML)...)
-	settingsFixture = append(settingsFixture, statusReply(t, key, pairGetID(t, "led get"), 200, ledXML)...)
-	settingsCam := fakecam.New(t, settingsFixture)
-
-	// serveCamera dials three times, in this order: once for
-	// Support/Abilities, once inside probeCamera for the message sweep,
-	// and once for the curated settings read. The first two share
-	// probeCam; the third gets settingsCam. See the comment above for why
-	// the third cannot reuse the first two's connection or fixture.
-	var calls int
-	dial := func(ctx context.Context, c control.Camera) (*baichuan.Conn, error) {
-		calls++
-		addr := probeCam.Addr()
-		if calls >= 3 {
-			addr = settingsCam.Addr()
-		}
-		return baichuan.Dial(ctx, addr, baichuan.Options{Password: ""})
-	}
-
-	cgiCam := newCGIFloodlightCamera(t, 1, 1) // mode 1, state 1: "on"
-	cgiDial := func(c control.Camera) (*cgi.Client, error) {
-		return cgi.Dial(cgiCam.addr(), "admin", "")
-	}
-
+// TestCameraLiveTabShowsStreamsAndActions pins the Live tab: the camera's
+// stream state, a picker entry for the playable stream with its player URL,
+// the shell's Live and Settings tabs, and Remove living under Settings.
+func TestCameraLiveTabShowsStreamsAndActions(t *testing.T) {
 	h := hub.New(4)
 	h.SetKeyframe("H264", nil)
 	hubs := server.StaticHubs(map[string]*hub.Hub{"one/sub": h})
@@ -304,100 +244,76 @@ func TestCameraPageShowsAllSixCombinedProperties(t *testing.T) {
 	s := newTestServer(t, control.Options{
 		AllowNoPassword: true,
 		ConfigPath:      writeTestConfig(t, "one"),
-		Dial:            dial,
-		CGIDial:         cgiDial,
 		Hubs:            hubs,
 		Status: fixedStatus{
-			"one/main": {Connected: true, Streaming: true, FPS: 24.9, BitrateBps: 6.2e6},
+			"one/sub": {Connected: true, Streaming: true, FPS: 14.9, BitrateBps: 6.2e5},
 		},
 	})
 	body := getBody(t, s, "/cameras/one")
 
-	// 1 and 2: stream state and bitrate, off the dashboard's own stats row
-	// for this camera (see dashboard_test.go's own bitrate/state tests).
-	for _, want := range []string{"streaming", "24.9", "6.2"} {
+	for _, want := range []string{
+		"streaming",
+		`data-stream="sub" data-url="/stream/one_sub.ts"`,
+		`href="/cameras/one" aria-current="page">Live</a>`,
+		`href="/cameras/one/settings/image">Settings</a>`,
+	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("camera page is missing its stream state: no %q", want)
+			t.Errorf("Live tab is missing %q:\n%s", want, body)
 		}
 	}
+	// Removing a camera is a setting, not something next to the video.
+	if strings.Contains(body, `action="/cameras/one/remove"`) {
+		t.Error("the Live tab carries a Remove form; it belongs under Settings")
+	}
+	rm := getBody(t, s, "/cameras/one/settings/remove")
+	if n := strings.Count(rm, `action="/cameras/one/remove"`); n != 1 {
+		t.Errorf("%d Remove forms on settings/remove, want 1:\n%s", n, rm)
+	}
+}
 
-	// 3: the playable video tile. This markup (the data-src container and
-	// its play button) exists ONLY on cameravideo's playable branch;
-	// dashboard.html's non-playable branch renders only the "No browser
-	// playable stream" hint text, so this fails if the page falls back to
-	// it, e.g. because Hubs went unwired or the tile stopped joining by
-	// camera name.
-	if !strings.Contains(body, `class="cam-video" data-src="/stream/one_sub.ts"`) {
-		t.Errorf("camera page does not render the playable video tile:\n%s", body)
-	}
-	if !strings.Contains(body, "Play one") {
-		t.Errorf("camera page does not render this tile's play button")
-	}
-	if strings.Contains(body, "No browser playable stream") {
-		t.Errorf("camera page fell back to the non-playable branch even though a playable codec was reported")
-	}
+// TestCameraSettingsSectionsReadOnlyTheirOwnBlock pins the Settings tab:
+// each category reads its own block and renders the camera's values, and
+// the forms send the operator back to that category after a save.
+func TestCameraSettingsSectionsReadOnlyTheirOwnBlock(t *testing.T) {
+	key := baichuan.AESKey(testProbeNonce, "")
+	osdXML := testXMLHeader + `<body><OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>1</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName><OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>1</topLeftX><topLeftY>1</topLeftY></OsdDatetime></body>`
+	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight><mirror>0</mirror><flip>0</flip></InputAdvanceCfg></body>`
+	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state><lightState>open</lightState></LedState></body>`
 
-	// 4: curated settings, a concrete field label AND the value that came
-	// from the fixture, not just the static "Settings" <h2> that renders
-	// unconditionally regardless of whether fields are wired at all.
-	if !strings.Contains(body, "Camera name") {
-		t.Errorf("camera page does not render the Camera name field")
-	}
-	if !strings.Contains(body, `value="lounge"`) {
-		t.Errorf("camera page does not show the camera name read from the camera:\n%s", body)
-	}
-	if !strings.Contains(body, "Brightness") {
-		t.Errorf("camera page does not render the Brightness field")
-	}
-	// The numeric image settings render as a slider PLUS the number box
-	// that actually posts. The box is pinned by its full attribute run, not
-	// by the bare value: it is the input carrying name="value", so a change
-	// that left only the slider behind would post nothing at all, and a
-	// bare value="120" would still match the slider and hide that.
-	if !strings.Contains(body, `class="slider-box" name="value" value="120"`) {
-		t.Errorf("camera page does not show the brightness read from the camera in the box that posts it:\n%s", body)
-	}
-	if !strings.Contains(body, `type="range"`) {
-		t.Errorf("camera page does not render the numeric image settings as sliders:\n%s", body)
-	}
-	if strings.Contains(body, "not available:") {
-		t.Errorf("a curated field that resolved cleanly was rendered as unavailable:\n%s", body)
-	}
-
-	// The layout itself, which is what this page was reordered for: the
-	// controls an operator came here to touch come before the three tables
-	// the camera merely reports, and those are collapsed. A future edit
-	// that puts the reference tables back above the settings must fail
-	// here, not just look wrong to whoever next opens the page.
-	settingsAt := strings.Index(body, "<h2>Camera name and overlay</h2>")
-	reportsAt := strings.Index(body, "what this camera reports")
-	if settingsAt < 0 || reportsAt < 0 {
-		t.Fatalf("camera page is missing the first settings group or the collapsed reports section:\n%s", body)
-	}
-	if settingsAt > reportsAt {
-		t.Errorf("the camera's reference tables come before the settings again")
-	}
-	if !strings.Contains(body, `<details class="card reports">`) {
-		t.Errorf("what the camera reports is not inside a details section:\n%s", body)
-	}
-	if strings.Contains(body, `<details class="card reports" open`) {
-		t.Errorf("the reports section is open by default; it is reference, not a control")
-	}
-
-	// 5: the floodlight, seeded from the fake CGI camera's real
-	// GetWhiteLed answer (mode 1, state 1 = "on"), not merely the always
-	// present "Floodlight" <h3>.
-	if !strings.Contains(body, "Floodlight") {
-		t.Errorf("camera page does not render the Floodlight section")
-	}
-	if !strings.Contains(body, `value="on" checked`) {
-		t.Errorf("camera page does not show the floodlight's current state as selected:\n%s", body)
-	}
-
-	// 6: the advanced/raw-blocks link, which only renders inside the
-	// {{if .Probes}} block once probeCamera has actually completed a
-	// sweep, never when a camera never dialled leaves Probes nil.
-	if !strings.Contains(body, `<a href="/cameras/one/advanced">every document this camera has</a>`) {
-		t.Errorf("camera page does not link to the advanced/raw-blocks view:\n%s", body)
+	for _, tc := range []struct {
+		cat, block, doc string
+		want            []string
+	}{
+		{"overlay", "osd get", osdXML, []string{"<h2>Name and timestamp</h2>", `value="lounge"`}},
+		{"image", "isp get", ispXML, []string{"Brightness", `class="slider-box" name="value" value="120"`, `type="range"`}},
+		{"lights", "led get", ledXML, []string{"Infrared light", "Floodlight", `value="on" checked`}},
+	} {
+		t.Run(tc.cat, func(t *testing.T) {
+			fixture := loginHandshake(testProbeNonce, testProbeDeviceInfo)
+			fixture = append(fixture, statusReply(t, key, pairGetID(t, tc.block), 200, tc.doc)...)
+			cam := fakecam.New(t, fixture)
+			cgiCam := newCGIFloodlightCamera(t, 1, 1) // mode 1, state 1: "on"
+			s := newTestServer(t, control.Options{
+				AllowNoPassword: true,
+				ConfigPath:      writeTestConfig(t, "one"),
+				Dial: func(ctx context.Context, c control.Camera) (*baichuan.Conn, error) {
+					return baichuan.Dial(ctx, cam.Addr(), baichuan.Options{Password: ""})
+				},
+				CGIDial: func(c control.Camera) (*cgi.Client, error) {
+					return cgi.Dial(cgiCam.addr(), "admin", "")
+				},
+			})
+			body := getBody(t, s, "/cameras/one/settings/"+tc.cat)
+			for _, want := range append(tc.want,
+				`name="return" value="/cameras/one/settings/`+tc.cat+`"`,
+				`aria-current="page">Settings</a>`) {
+				if !strings.Contains(body, want) {
+					t.Errorf("settings/%s is missing %q:\n%s", tc.cat, want, body)
+				}
+			}
+			if strings.Contains(body, "not available:") {
+				t.Errorf("a field that resolved cleanly was rendered as unavailable:\n%s", body)
+			}
+		})
 	}
 }

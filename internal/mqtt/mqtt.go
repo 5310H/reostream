@@ -1,0 +1,266 @@
+// Package mqtt is a minimal MQTT 3.1.1 publish-only client: enough to feed
+// motion and status into mosquitto / Home Assistant / Frigate without pulling
+// in a full client library. It publishes QoS 0 or QoS 1, reconnects on the
+// next Publish after any error, and uses keep-alive 0 so an idle connection is
+// never dropped by the broker (there is no subscribe path to service pings).
+package mqtt
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"sync"
+	"time"
+)
+
+// Client publishes to a single broker. It is safe for concurrent use; each
+// Publish is serialised. A dropped connection is re-established on the next
+// Publish, so a broker restart heals itself.
+type Client struct {
+	addr     string
+	clientID string
+	user     string
+	pass     string
+	dialer   net.Dialer
+
+	mu   sync.Mutex
+	conn net.Conn
+	br   *bufio.Reader
+	pid  uint16
+}
+
+// New returns a client for broker addr ("host:port"). clientID must be unique
+// on the broker; user and pass may be empty for an anonymous broker.
+func New(addr, clientID, user, pass string) *Client {
+	return &Client{
+		addr:     addr,
+		clientID: clientID,
+		user:     user,
+		pass:     pass,
+		dialer:   net.Dialer{Timeout: 5 * time.Second},
+	}
+}
+
+// Publish sends payload to topic. qos is 0 or 1; a QoS 1 publish waits for the
+// broker's PUBACK. retain asks the broker to keep the message as the topic's
+// last known value.
+func (c *Client) Publish(topic string, payload []byte, qos byte, retain bool) error {
+	if qos > 1 {
+		return errors.New("mqtt: only QoS 0 and 1 are supported")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Two attempts: a connection that the broker has silently closed is only
+	// discovered when a write or PUBACK read fails, so the first attempt may
+	// die on a stale socket. Dropping it and retrying publishes on a fresh
+	// connection, which heals a broker restart without losing the event.
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err = c.ensure(); err != nil {
+			continue
+		}
+		if err = c.send(topic, payload, qos, retain); err == nil {
+			return nil
+		}
+		c.drop()
+	}
+	return err
+}
+
+func (c *Client) send(topic string, payload []byte, qos byte, retain bool) error {
+	var id uint16
+	if qos == 1 {
+		c.pid++
+		if c.pid == 0 {
+			c.pid = 1
+		}
+		id = c.pid
+	}
+	if err := c.write(encodePublish(topic, payload, qos, retain, id)); err != nil {
+		return err
+	}
+	if qos == 1 {
+		return c.readPuback(id)
+	}
+	return nil
+}
+
+// Close drops the connection. The client may be reused afterwards.
+func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.drop()
+	return nil
+}
+
+func (c *Client) ensure() error {
+	if c.conn != nil {
+		return nil
+	}
+	conn, err := c.dialer.Dial("tcp", c.addr)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+	c.br = bufio.NewReader(conn)
+	if err := c.write(encodeConnect(c.clientID, c.user, c.pass)); err != nil {
+		c.drop()
+		return err
+	}
+	if err := c.readConnack(); err != nil {
+		c.drop()
+		return err
+	}
+	return nil
+}
+
+func (c *Client) write(b []byte) error {
+	_ = c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := c.conn.Write(b)
+	return err
+}
+
+func (c *Client) drop() {
+	if c.conn != nil {
+		_ = c.conn.Close()
+		c.conn = nil
+		c.br = nil
+	}
+}
+
+func (c *Client) readConnack() error {
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	typ, body, err := readPacket(c.br)
+	if err != nil {
+		return err
+	}
+	if typ>>4 != 2 || len(body) < 2 {
+		return fmt.Errorf("mqtt: expected CONNACK, got type %d", typ>>4)
+	}
+	if body[1] != 0 {
+		return fmt.Errorf("mqtt: connection refused, code %d", body[1])
+	}
+	return nil
+}
+
+func (c *Client) readPuback(id uint16) error {
+	_ = c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		typ, body, err := readPacket(c.br)
+		if err != nil {
+			return err
+		}
+		if typ>>4 != 4 { // not PUBACK; ignore anything else the broker sends
+			continue
+		}
+		if len(body) < 2 || uint16(body[0])<<8|uint16(body[1]) != id {
+			return errors.New("mqtt: PUBACK packet id mismatch")
+		}
+		return nil
+	}
+}
+
+// --- wire encoding (MQTT 3.1.1) ---
+
+func encodeConnect(clientID, user, pass string) []byte {
+	var vh []byte
+	vh = append(vh, encodeString("MQTT")...)
+	vh = append(vh, 0x04) // protocol level 4 (3.1.1)
+	flags := byte(0x02)   // clean session
+	if user != "" {
+		flags |= 0x80
+	}
+	if pass != "" {
+		flags |= 0x40
+	}
+	vh = append(vh, flags)
+	vh = append(vh, 0x00, 0x00) // keep-alive 0 (disabled)
+
+	payload := encodeString(clientID)
+	if user != "" {
+		payload = append(payload, encodeString(user)...)
+	}
+	if pass != "" {
+		payload = append(payload, encodeString(pass)...)
+	}
+	return frame(0x10, append(vh, payload...))
+}
+
+func encodePublish(topic string, payload []byte, qos byte, retain bool, id uint16) []byte {
+	hdr := byte(0x30) | qos<<1
+	if retain {
+		hdr |= 0x01
+	}
+	body := encodeString(topic)
+	if qos > 0 {
+		body = append(body, byte(id>>8), byte(id))
+	}
+	body = append(body, payload...)
+	return frame(hdr, body)
+}
+
+func frame(hdr byte, body []byte) []byte {
+	out := []byte{hdr}
+	out = append(out, encodeRemaining(len(body))...)
+	return append(out, body...)
+}
+
+func encodeString(s string) []byte {
+	b := make([]byte, 2+len(s))
+	b[0] = byte(len(s) >> 8)
+	b[1] = byte(len(s))
+	copy(b[2:], s)
+	return b
+}
+
+func encodeRemaining(n int) []byte {
+	var b []byte
+	for {
+		d := byte(n % 128)
+		n /= 128
+		if n > 0 {
+			d |= 0x80
+		}
+		b = append(b, d)
+		if n == 0 {
+			return b
+		}
+	}
+}
+
+// readPacket reads one control packet, returning its first byte (type and
+// flags) and its remaining-length body.
+func readPacket(r *bufio.Reader) (byte, []byte, error) {
+	typ, err := r.ReadByte()
+	if err != nil {
+		return 0, nil, err
+	}
+	n, err := readRemaining(r)
+	if err != nil {
+		return 0, nil, err
+	}
+	body := make([]byte, n)
+	if _, err := io.ReadFull(r, body); err != nil {
+		return 0, nil, err
+	}
+	return typ, body, nil
+}
+
+func readRemaining(r *bufio.Reader) (int, error) {
+	value, mult := 0, 1
+	for i := 0; i < 4; i++ {
+		b, err := r.ReadByte()
+		if err != nil {
+			return 0, err
+		}
+		value += int(b&0x7f) * mult
+		if b&0x80 == 0 {
+			return value, nil
+		}
+		mult *= 128
+	}
+	return 0, errors.New("mqtt: remaining length too long")
+}

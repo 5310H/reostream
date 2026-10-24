@@ -24,6 +24,8 @@ import (
 	"github.com/VoltTech21/reostream/internal/config"
 	"github.com/VoltTech21/reostream/internal/control"
 	"github.com/VoltTech21/reostream/internal/frames"
+	"github.com/VoltTech21/reostream/internal/hub"
+	"github.com/VoltTech21/reostream/internal/presence"
 	"github.com/VoltTech21/reostream/internal/rtsp"
 	"github.com/VoltTech21/reostream/internal/server"
 	"github.com/VoltTech21/reostream/internal/stream"
@@ -70,11 +72,12 @@ func main() {
 	configFlag := flag.String("config", "", "path to the TOML config file (default: <data>/config.toml)")
 	dataDir := flag.String("data", "/data", "data directory; holds config.toml when -config is not set")
 	listenOverride := flag.String("listen", "", "HTTP listen address, overriding the config file's")
+	rtspListenOverride := flag.String("rtsp-listen", "", "RTSP listen address, overriding the config file's [rtsp].listen; turns RTSP on if the config has no [rtsp] section")
 	controlListenOverride := flag.String("control-listen", "", "address for the page, overriding the config file's [control].listen. Symmetric with -listen; mostly useful for moving the page off 8562 without editing the config")
 	streamBase := flag.String("stream-base", "", "browser reachable base URL for live tiles, for example http://192.0.2.10:8560 (empty means the control page's own same-origin /stream/ mount, which is the right default; only set this to point tiles at a different listener)")
 	flag.Parse()
 
-	d, err := startup(*configFlag, *dataDir, *listenOverride, *controlListenOverride, *streamBase)
+	d, err := startup(*configFlag, *dataDir, *listenOverride, *rtspListenOverride, *controlListenOverride, *streamBase)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reostream: %v\n", err)
 		os.Exit(1)
@@ -103,7 +106,7 @@ func main() {
 	// Shut the control server down in its own goroutine, not inline here.
 	// http.Server.Shutdown blocks until active connections finish and does
 	// not cancel their request contexts, so a long-lived connection on the
-	// control listener (the log stream Task 7 adds, or just a browser tab
+	// control listener (the log stream, or just a browser tab
 	// left open on the page) would otherwise delay runShutdown's cancel()
 	// below by up to its own timeout, and that cancel is what starts
 	// releasing camera sessions. Running it concurrently means a slow
@@ -152,7 +155,7 @@ type daemon struct {
 // error here is always fatal in main: a config that exists and fails to
 // parse or validate, an explicit -config pointing at nothing, or a listener
 // that fails to start.
-func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamBase string) (*daemon, error) {
+func startup(configFlag, dataDir, listenOverride, rtspListenOverride, controlListenOverride, streamBase string) (*daemon, error) {
 	explicitConfig := configFlag != ""
 	configPath := resolveConfigPath(dataDir, configFlag)
 
@@ -233,6 +236,14 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 	// Raw frame feed at "/<name>.frames" on the streaming port, for the
 	// same streams listed under rtsp.
 	framesSrv := frames.New()
+	// -rtsp-listen moves RTSP, or turns it on when the config has no
+	// [rtsp] section, the same way -listen moves the streaming port.
+	if rtspListenOverride != "" {
+		if cfg.RTSP == nil {
+			cfg.RTSP = &config.RTSPConfig{}
+		}
+		cfg.RTSP.Listen = rtspListenOverride
+	}
 	var rtspSrv *rtsp.Server
 	if cfg.RTSP != nil {
 		rtspSrv = rtsp.New(cfg.RTSP.Listen)
@@ -247,6 +258,26 @@ func startup(configFlag, dataDir, listenOverride, controlListenOverride, streamB
 		rs.SetTalker(cameraTalker{name: camera, sup: sup})
 		return multiSink{rs, fs}
 	})
+	// Battery cameras' last pictures live next to the config, so a restart
+	// keeps them.
+	sup.SetStillDir(filepath.Join(filepath.Dir(configPath), "stills"))
+
+	// A battery camera's presence stream: what a recorder reads instead of
+	// the camera, so it can stay open around the clock. See internal/presence.
+	if rtspSrv != nil {
+		sup.AttachPresence(func(camera string, h *hub.Hub) stream.FrameSink {
+			if p := presence.Lookup(camera); p != nil {
+				return p
+			}
+			p := presence.New(camera, rtspSrv.Add(rtsp.Path(camera, "main")))
+			presence.Register(p)
+			if codec, es := h.Keyframe(); es != nil {
+				p.SeedFrame(codec, es)
+			}
+			go p.Run(supCtx)
+			return p
+		})
+	}
 	if rtspSrv != nil {
 		if err := rtspSrv.Start(); err != nil {
 			cancelSup()
@@ -586,6 +617,7 @@ func (c cameraTalker) Open(ctx context.Context) (rtsp.TalkSession, error) {
 			Username: cfg.Username,
 			Password: cfg.Password,
 			Channel:  cfg.Channel,
+			UID:      cfg.UID,
 			// The camera sends nothing back during a talk session, and the
 			// session pings rather than relying on traffic to stay up.
 			IdleTimeout: 24 * time.Hour,

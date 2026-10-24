@@ -9,124 +9,232 @@
 // running, so at most one stream is ever decoded in this tab.
 
 (function () {
-  var active = null;
-
-  function stopActive() {
-    if (!active) return;
-    // Pausing the <video> is not enough: mpegts.js keeps pulling over XHR
-    // while paused, which leaves the daemon streaming to a tab nobody is
-    // watching. destroy() closes the fetch.
-    try { active.player.pause(); } catch (e) {}
-    try { active.player.unload(); } catch (e) {}
-    try { active.player.detachMediaElement(); } catch (e) {}
-    active.player.destroy();
-    active.video.removeAttribute('controls');
-    var restart = active.restart;
-    if (active.btn) active.btn.hidden = false;
-    if (restart) {
-      restart();
-    } else {
-      active.video.hidden = true;
-      if (active.still) active.still.hidden = false;
-    }
-    active = null;
-  }
-
-  // stepped is the one tile playing its balanced stream, if any. The
-  // ambient sub-stream tiles are not tracked here: they run for the life
-  // of the page.
-  function startPlayer(container, url, controls) {
-    if (!window.mpegts || !mpegts.isSupported()) return null;
-    var video = container.querySelector('video');
-    var still = container.querySelector('img');
-    var player = reostreamPlayer(url, video);
-    player.attachMediaElement(video);
-    player.load();
-    var p = video.play();
-    if (p && p.catch) p.catch(function () {});
-    video.hidden = false;
-    if (controls) video.setAttribute('controls', '');
-    if (still) still.hidden = true;
-    return {player: player, video: video, still: still, container: container};
-  }
-
-  // No more than this many ambient tiles decode at once, however many
-  // cameras there are. A fleet is allowed to grow; a browser tab's decoder
-  // budget is not.
-  var maxAmbient = 6;
-  var ambientCount = 0;
-
-  function stopAmbient(t) {
-    if (!t.ambient) return;
-    try { t.ambient.player.pause(); } catch (e) {}
-    try { t.ambient.player.unload(); } catch (e) {}
-    try { t.ambient.player.detachMediaElement(); } catch (e) {}
-    try { t.ambient.player.destroy(); } catch (e) {}
-    t.ambient.video.hidden = true;
-    if (t.ambient.still) t.ambient.still.hidden = false;
-    t.ambient = null;
-    ambientCount--;
-  }
-
-  function startAmbient(t) {
-    if (t.ambient || t.stepped || ambientCount >= maxAmbient) return;
-    if (!t.container.dataset.autoplay) return;
-    var video = t.container.querySelector('video');
-    if (video) video.muted = true;
-    t.ambient = startPlayer(t.container, t.container.dataset.src, false);
-    if (t.ambient) ambientCount++;
-  }
-
+  // The one live player, when someone has pressed a tile. Null the rest of
+  // the time: the rotation below owns the decoder otherwise.
+  var live = null;
+  // Cameras to walk, in page order.
   var tiles = [];
-  document.querySelectorAll('.cam-video[data-src]').forEach(function (container) {
-    var btn = container.querySelector('.play-btn');
-    var t = {container: container, btn: btn, ambient: null, stepped: false};
-    tiles.push(t);
+  var turn = 0;
+  var rotating = false;
 
-    // The button means "step up" now, not "start", so it only has a job
-    // where there is a better stream to step up to.
-    if (btn && container.dataset.autoplay) btn.hidden = !container.dataset.extern;
+  // How long to give a camera to produce a frame before moving on, and how
+  // long to wait between cameras. A camera that is down must not hold the
+  // rotation up.
+  var FRAME_WAIT_MS = 6000;
+  var BETWEEN_MS = 250;
 
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      var up = container.dataset.extern || container.dataset.src;
-      // One stepped-up tile at a time, and the previous one goes back to
-      // its ambient sub stream rather than stopping dead.
-      stopActive();
-      stopAmbient(t);
-      t.stepped = true;
-      active = startPlayer(container, up, true);
-      if (active) {
-        active.btn = btn;
-        active.restart = function () {
-          t.stepped = false;
-          startAmbient(t);
-        };
-      }
-      btn.hidden = true;
+  function teardown(p) {
+    if (!p) return;
+    // Pausing is not enough: mpegts.js keeps pulling over XHR while
+    // paused, which leaves the daemon streaming to a tab nobody watches.
+    try { p.pause(); } catch (e) {}
+    try { p.unload(); } catch (e) {}
+    try { p.detachMediaElement(); } catch (e) {}
+    try { p.destroy(); } catch (e) {}
+  }
+
+  // Gives the tile the camera's own shape.
+  //
+  // Every tile used to be 16:9 with the picture letterboxed inside it, so a
+  // camera that is not 16:9 drew at a fraction of the space it was given: a
+  // 4096x1152 panoramic filled the width and half the height, with empty
+  // hatching above and below, and a 2560x2560 fisheye filled the height and
+  // drew a square in the middle of a wide box. Nothing was cropped, but
+  // nothing was full size either, and "half the tile is hatching" reads as
+  // a broken picture rather than a deliberate one.
+  //
+  // The shape is taken from the frame rather than from config because only
+  // the frame knows: a fisheye changes its own frame size when its Image
+  // Layout changes (2560x2560 in one mode, 3200x3200 in another), and no
+  // stored value tracks that.
+  function shapeTile(t, w, h) {
+    if (!w || !h || !t.container) return;
+    var ratio = w / h;
+    // Guard rails, not correctness: a camera far outside this range would
+    // make one tile tall enough to push the rest of the fleet off screen,
+    // or thin enough to be unreadable. Both clamp to a letterbox, which is
+    // the old behaviour and is the right fallback.
+    if (ratio < 0.5) ratio = 0.5;
+    if (ratio > 4) ratio = 4;
+    t.container.style.aspectRatio = ratio.toFixed(4);
+  }
+
+  // A tile whose camera never produced a still -- pressed for live before
+  // the rotation reached it -- still gets its shape, from the live video.
+  function shapeFromVideo(t) {
+    if (!t.video) return;
+    t.video.addEventListener('loadedmetadata', function () {
+      shapeTile(t, t.video.videoWidth, t.video.videoHeight);
     });
-  });
+  }
 
-  // A tile decodes while it is on screen. Without this every tile decoded
-  // for the life of the tab, whether or not anyone could see it.
-  if (window.IntersectionObserver) {
-    var seen = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        var t = tiles.filter(function (x) { return x.container === e.target; })[0];
-        if (!t) return;
-        if (e.isIntersecting) {
-          startAmbient(t);
-        } else if (!t.stepped) {
-          stopAmbient(t);
+  // Draws whatever the video is showing into the tile's still image.
+  function grab(t, video) {
+    try {
+      if (!video.videoWidth || !video.videoHeight) return false;
+      var c = document.createElement('canvas');
+      c.width = video.videoWidth;
+      c.height = video.videoHeight;
+      c.getContext('2d').drawImage(video, 0, 0);
+      t.still.src = c.toDataURL('image/jpeg', 0.7);
+      t.still.hidden = false;
+      shapeTile(t, video.videoWidth, video.videoHeight);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // One camera's turn: connect, take a frame, disconnect.
+  // The still being taken right now, if any.
+  var snapping = null;
+
+  function snap(t, done) {
+    if (!window.mpegts || !mpegts.isSupported()) return done();
+    var video = t.video;
+    // A battery camera with no picture yet has nothing to take a still
+    // from, and its live stream would wake it.
+    if (!t.src) return done();
+    var player = mpegts.createPlayer({type: 'mpegts', isLive: true, url: t.src});
+    var finished = false;
+    snapping = {finish: finish};
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      snapping = null;
+      clearTimeout(timer);
+      video.removeEventListener('loadeddata', onData);
+      teardown(player);
+      video.hidden = true;
+      done();
+    }
+
+    function onData() {
+      grab(t, video);
+      finish();
+    }
+
+    var timer = setTimeout(finish, FRAME_WAIT_MS);
+    try {
+      video.muted = true;
+      player.attachMediaElement(video);
+      player.load();
+      var pr = video.play();
+      if (pr && pr.catch) pr.catch(function () {});
+      video.addEventListener('loadeddata', onData);
+    } catch (e) {
+      finish();
+    }
+  }
+
+  function step() {
+    if (!rotating) return;
+    if (live || !tiles.length) {
+      // Someone is watching something; leave the decoder alone.
+      setTimeout(step, 1000);
+      return;
+    }
+    var t = tiles[turn % tiles.length];
+    turn++;
+    snap(t, function () { setTimeout(step, BETWEEN_MS); });
+  }
+
+  function startLive(t) {
+    if (!window.mpegts || !mpegts.isSupported()) return;
+    // A still being taken uses the same video element; finish it first, or
+    // its teardown hides the live picture a moment after it starts.
+    if (snapping) snapping.finish();
+    stopLive();
+    var url = t.live || t.extern || t.src;
+    var player = mpegts.createPlayer({type: 'mpegts', isLive: true, url: url});
+    player.attachMediaElement(t.video);
+    player.load();
+    // A battery camera's session ends when reostream puts it back to
+    // sleep; show its last frame rather than a frozen player.
+    if (t.live) {
+      player.on(mpegts.Events.LOADING_COMPLETE, function () { if (live && live.t === t) stopLive(); });
+      player.on(mpegts.Events.ERROR, function () { if (live && live.t === t) stopLive(); });
+    }
+    // A paused live stream keeps buffering, so playing again resumes where
+    // it stopped and stays that far behind the camera for good. Jumping to
+    // the end of what is buffered puts it back on the live edge. This is
+    // on every play, not just the first, because pausing is exactly when
+    // it drifts.
+    t.video.addEventListener('play', function () {
+      try {
+        var b = t.video.buffered;
+        if (b && b.length) {
+          var edge = b.end(b.length - 1);
+          if (edge - t.video.currentTime > 1) t.video.currentTime = edge - 0.1;
+        }
+      } catch (e) {}
+    });
+    reostreamAudio.play(t.video);
+    t.video.hidden = false;
+    t.video.setAttribute('controls', '');
+    t.still.hidden = true;
+    if (t.btn) t.btn.hidden = true;
+    // "press for live" is an instruction. While live video is playing it
+    // is an instruction to do what has already been done.
+    if (t.caption) t.caption.hidden = true;
+    live = {player: player, t: t};
+  }
+
+  function stopLive() {
+    if (!live) return;
+    var t = live.t;
+    grab(t, t.video);
+    teardown(live.player);
+    t.video.hidden = true;
+    t.video.removeAttribute('controls');
+    if (t.btn) t.btn.hidden = false;
+    if (t.caption) t.caption.hidden = false;
+    live = null;
+  }
+
+  document.querySelectorAll('.cam-video[data-src]').forEach(function (container) {
+    var t = {
+      container: container,
+      src: container.dataset.src,
+      // A battery camera's still and its live stream are different URLs:
+      // the still never wakes it, the live stream does.
+      live: container.dataset.live || '',
+      extern: container.dataset.extern || '',
+      video: container.querySelector('video'),
+      still: container.querySelector('img'),
+      btn: container.querySelector('.play-btn'),
+      caption: container.querySelector('.caption')
+    };
+    if (!t.video || !t.still) return;
+    shapeFromVideo(t);
+    tiles.push(t);
+    if (t.btn) {
+      t.btn.addEventListener('click', function () {
+        if (live && live.t === t) {
+          stopLive();
+        } else {
+          startLive(t);
         }
       });
-    }, {rootMargin: '100px'});
-    tiles.forEach(function (t) { seen.observe(t.container); });
-  } else {
-    // No observer: fall back to filling the budget from the top of the
-    // page, which is the order they are on screen anyway.
-    tiles.forEach(startAmbient);
+    }
+  });
+
+  if (tiles.length) {
+    rotating = true;
+    step();
   }
+
+  // Nothing decodes while the tab is in the background.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      stopLive();
+      rotating = false;
+    } else if (!rotating && tiles.length) {
+      rotating = true;
+      step();
+    }
+  });
 
   // Copying a URL. navigator.clipboard is absent on a page served over
   // plain HTTP to anything but localhost, which is how this page is

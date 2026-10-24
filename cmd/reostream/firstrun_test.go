@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func TestStartupWithAnExplicitMissingConfigStaysFatal(t *testing.T) {
 	// page on the default first-run config.
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "does-not-exist.toml")
-	if _, err := startup(missing, dir, "", "", ""); err == nil {
+	if _, err := startup(missing, dir, "", "", "", ""); err == nil {
 		t.Fatal("expected an error for an explicit -config pointing at a missing file")
 	}
 }
@@ -43,7 +44,7 @@ func TestStartupWithNoConfigSynthesizesAndServes(t *testing.T) {
 	// come up -- an empty fleet, and a control listener that answers --
 	// not merely fail to crash.
 	dir := t.TempDir()
-	d, err := startup("", dir, "127.0.0.1:0", "127.0.0.1:0", "")
+	d, err := startup("", dir, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "")
 	if err != nil {
 		t.Fatalf("startup: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestTheClaimTokenIsNeverWrittenToDisk(t *testing.T) {
 // the only way in, since the token is shown nowhere else.
 func TestTheClaimMessageFollowsTheControlListenOverride(t *testing.T) {
 	dir := t.TempDir()
-	d, err := startup("", dir, "127.0.0.1:0", "127.0.0.1:0", "")
+	d, err := startup("", dir, "127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0", "")
 	if err != nil {
 		t.Fatalf("startup: %v", err)
 	}
@@ -248,5 +249,80 @@ func TestTheClaimMessageFollowsTheControlListenOverride(t *testing.T) {
 	}
 	if strings.Contains(d.firstRunMsg, ":8562") {
 		t.Fatalf("the claim message names the default port despite an override:\n%s", d.firstRunMsg)
+	}
+}
+
+// -rtsp-listen moves RTSP the way -listen and -control-listen move theirs
+// (issue #8), and turns RTSP on for a config with no [rtsp] section.
+func TestRTSPListenFlagMovesRTSP(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	probe.Close()
+
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfg, []byte("listen = \"127.0.0.1:0\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := startup(cfg, dir, "127.0.0.1:0", addr, "", "")
+	if err != nil {
+		t.Fatalf("startup: %v", err)
+	}
+	t.Cleanup(func() {
+		d.cancelSup()
+		if d.rtspSrv != nil {
+			d.rtspSrv.Close()
+		}
+		d.httpSrv.Close()
+	})
+	if d.rtspSrv == nil || d.cfg.RTSP == nil || d.cfg.RTSP.Listen != addr {
+		t.Fatalf("RTSP not on %s: %+v", addr, d.cfg.RTSP)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		c, err := net.Dial("tcp", addr)
+		if err == nil {
+			c.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nothing listening on %s: %v", addr, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Startup with a battery camera whose last picture was kept: the presence
+// stream reads that picture while the supervisor is setting up its sinks.
+// It once did so through the supervisor's own lock and deadlocked the
+// whole daemon at start.
+func TestStartupWithABatteryCameraAndAKeptStill(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	os.MkdirAll(filepath.Join(dir, "stills"), 0o755)
+	os.WriteFile(filepath.Join(dir, "stills", "porch_main.still"), []byte("H264\n\x00\x00\x00\x01\x67\x64\x00\x1f\x00\x00\x00\x01\x68\xee\x00\x00\x00\x01\x65\x88"), 0o644)
+	os.WriteFile(cfg, []byte("listen = \"127.0.0.1:0\"\n[rtsp]\nlisten = \"127.0.0.1:0\"\n[[camera]]\nname = \"porch\"\naddress = \"192.0.2.20\"\npassword = \"x\"\nuid = \"95270000TESTUID1\"\n"), 0o600)
+	done := make(chan *daemon, 1)
+	go func() {
+		d, err := startup(cfg, dir, "127.0.0.1:0", "127.0.0.1:0", "", "")
+		if err != nil {
+			t.Errorf("startup: %v", err)
+		}
+		done <- d
+	}()
+	select {
+	case d := <-done:
+		if d != nil {
+			d.cancelSup()
+			if d.rtspSrv != nil {
+				d.rtspSrv.Close()
+			}
+			d.httpSrv.Close()
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup hung")
 	}
 }

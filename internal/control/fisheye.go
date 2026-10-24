@@ -12,11 +12,18 @@ import (
 
 // The fisheye's view modes.
 //
-// A fisheye sensor sees a circle. The camera can hand that over raw, or
-// dewarp it into a panorama, a 2x2 grid of corrected views, or two stacked
-// halves, and it does the dewarping itself: a client cropping regions out
-// of the circle and correcting them is redoing work the camera does
-// properly. All four come out at the same frame size.
+// A fisheye sensor sees a circle. This setting -- the camera's own menu
+// calls it "Image Layout" -- decides what the camera ENCODES from that
+// circle, and the frame size changes with it: mode 0 is 2560x2560 and mode
+// 1 is 3200x3200 on the camera this was measured against.
+//
+// It is not the setting an operator usually wants. The view modes in the
+// vendor's apps -- the draggable quad, the defished band -- are drawn by
+// the client from the raw circle and never touch the camera at all (see
+// fisheyeview.go, which does the same thing for this page). This one
+// re-encodes, so it changes the recording, and it costs a reboot. Reach for
+// it to change what is STORED; reach for the view page to change what is
+// SEEN.
 //
 // This is the most expensive write on the page, and the page has to say so
 // before anyone presses it:
@@ -39,12 +46,29 @@ type fisheyeOption struct {
 	What  string
 }
 
-// fisheyeOptions are the four modes, in the camera's own numbering.
+// fisheyeOptions are the modes in the camera's own numbering.
+//
+// Every one of these was a guess once, and every guess was wrong. They are
+// settled now the only way that works: each value written to a live camera,
+// read back, and photographed.
+//
+//	0  the raw circle                  2560x2560
+//	1  four panes plus a wide strip    3200x3200
+//	2  four panes, 2x2                 2560x2560
+//	3  two stacked panoramic bands     2560x2560
+//
+// Mode 2 is worth calling out. The camera's own menu offers three entries --
+// Fisheye View, Quad + 1 View, Dual Panoramic View -- and 2 is not among
+// them, yet it is accepted, reads back and encodes a clean 2x2 quad. That
+// also settles a contradiction this file used to record: the camera's range
+// reports a maximum of 3, meaning four values, while its Support block says
+// "3 modes" and the menu lists three. Both are right. Four exist, three are
+// offered.
 var fisheyeOptions = []fisheyeOption{
-	{Mode: 0, Value: "circle", What: "the raw fisheye circle, uncorrected"},
-	{Mode: 1, Value: "panorama", What: "the circle unwrapped into a flat band"},
-	{Mode: 2, Value: "quad", What: "four dewarped views in a 2x2 grid"},
-	{Mode: 3, Value: "dual", What: "two dewarped halves, stacked"},
+	{Mode: 0, Value: "fisheye", What: "the raw circle, uncorrected"},
+	{Mode: 1, Value: "quad+1", What: "four dewarped panes and a wide strip; the only mode that encodes 3200x3200"},
+	{Mode: 2, Value: "quad", What: "four dewarped panes in a 2x2 grid; the camera's own menu does not offer this one"},
+	{Mode: 3, Value: "dual-panoramic", What: "two dewarped halves as stacked bands"},
 }
 
 func fisheyeOptionByValue(v string) (fisheyeOption, bool) {
@@ -68,7 +92,7 @@ func fisheyeValueByMode(mode int) string {
 // fisheyeConfirmReason is what the operator is asked before the write. It
 // names both consequences, because neither is recoverable by pressing the
 // button again.
-const fisheyeConfirmReason = "This reboots the camera. It will be offline for about twenty seconds, every recorder reading it will reconnect, and every motion mask and detection zone on this camera will be pointing at the wrong place afterwards, because those coordinates are relative to the picture. Change the view?"
+const fisheyeConfirmReason = "This restarts the camera (about 20 seconds) and moves its motion zones. Change the view?"
 
 // readFisheye reads the camera's current view mode.
 func readFisheye(ctx context.Context, c *cgi.Client) (cgi.FishEye, error) {
@@ -100,6 +124,7 @@ func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("connecting to %s: %v", cam.Name, err), http.StatusBadGateway)
 		return
 	}
+	defer c.Close()
 
 	// The current view, for the undo and for Before. Best effort: a failed
 	// pre-read is not a reason to refuse the write.
@@ -114,7 +139,7 @@ func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
 			Before:  []byte(before),
 			Detail:  "the camera is already in that view, so nothing was written and it was not rebooted.",
 		}))
-		http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name), http.StatusSeeOther)
+		http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name)+"/settings/view", http.StatusSeeOther)
 		return
 	}
 
@@ -144,7 +169,7 @@ func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
 		flash.UndoValue = before
 	}
 	s.setFlash(w, r, flash)
-	http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name), http.StatusSeeOther)
+	http.Redirect(w, r, "/cameras/"+url.PathEscape(cam.Name)+"/settings/view", http.StatusSeeOther)
 }
 
 // fisheyeSettleDelay is how long a camera takes to come back from the

@@ -2,11 +2,6 @@ package control
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -243,59 +238,6 @@ const testSupportXML = testXMLHeader + `<body>
 <noExternStream>0</noExternStream>
 </Support>
 </body>`
-
-// The camera page dials once for GetSupport and GetAbilities and once more
-// inside probeCamera. Both connections replay the same fixture, so this
-// pins that the page renders a real model summary, a real ability list, and
-// the probe's own per-class counts, in one request.
-func TestServeCameraRendersSupportAbilitiesAndProbeCounts(t *testing.T) {
-	fixture, names := buildProbeFixture(t)
-	key := baichuan.AESKey(testProbeNonce, "")
-	fixture = append(fixture, statusReply(t, key, baichuan.MsgIDAbilityInfo, 200, testAbilityXML)...)
-
-	// The support reply the generic sweep above would have sent for
-	// "support" is a bare 405; overwrite the fixture's answer for that one
-	// name with real Support XML so GetSupport has something to parse.
-	supportID := baichuan.ConfigMessages["support"]
-	fixture = replaceReply(t, fixture, supportID, key, testSupportXML)
-
-	cam := fakecam.New(t, fixture)
-	dial := func(ctx context.Context, c Camera) (*baichuan.Conn, error) {
-		return baichuan.Dial(ctx, cam.Addr(), baichuan.Options{Password: ""})
-	}
-
-	s := newTestServer(t, Options{AllowNoPassword: true, ConfigPath: writeTestConfig(t, "cam1"), Dial: dial, CGIDial: noCGIDial})
-	ts := httptest.NewServer(s.Handler())
-	t.Cleanup(ts.Close)
-
-	resp, err := http.Get(ts.URL + "/cameras/cam1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("got %d, want 200", resp.StatusCode)
-	}
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(raw)
-
-	if !strings.Contains(html, "general") {
-		t.Error("page does not show the ability list from GetAbilities")
-	}
-	if !strings.Contains(html, "yes") {
-		t.Error("page does not show a yes/no field from GetSupport")
-	}
-	// Everything but the 200 and 400 cases from buildProbeFixture, and
-	// "support" itself, which replaceReply moves from absent to supported.
-	wantAbsent := len(names) - 3
-	if !strings.Contains(html, strconv.Itoa(wantAbsent)) {
-		t.Errorf("page does not show the absent count %d", wantAbsent)
-	}
-}
 
 // replaceReply swaps out the encrypted body of the first reply for id in
 // fixture, keeping every other message (and the surrounding message

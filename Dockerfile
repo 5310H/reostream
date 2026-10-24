@@ -61,7 +61,8 @@ USER nonroot:nonroot
 # 8560 is the streaming port, unauthenticated, what a recorder points at.
 # 8561 is RTSP, on by default, what go2rtc points at.
 # 8562 is the control page, behind the claimed password.
-EXPOSE 8560 8561 8562
+# 2121-2131 receive clips cameras upload over FTP, when that is set up.
+EXPOSE 8560 8561 8562 2121-2131
 
 ENTRYPOINT ["/usr/local/bin/reostream"]
 # -data points at the data directory, not a config path that may not exist

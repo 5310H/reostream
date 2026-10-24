@@ -105,6 +105,21 @@ func newFakeCGICamera(t *testing.T, mode, state int) *fakeCGICamera {
 			// camera reports a command it does not support, which offers
 			// no resets and is all these tests need.
 			w.Write([]byte(`[{"cmd":"` + r.URL.Query().Get("cmd") + `","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
+		// A real camera answers Logout, and every handler that dials a
+		// client now hands the session back -- see cgi.Client.Close and
+		// the exhaustion it exists to prevent.
+		case "Logout":
+			w.Write([]byte(`[{"cmd":"Logout","code":0,"value":{"rspCode":200}}]`))
+		// The camera page reads the encoder settings on this session too.
+		// Answered the way a camera that does not implement it replies,
+		// which is what leaves the Encoding section unrendered.
+		case "GetEnc":
+			w.Write([]byte(`[{"cmd":"GetEnc","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
+		// The camera page reads the speaker on this session too. Answered
+		// the way a camera without one replies, which is what leaves the
+		// Sound section unrendered.
+		case "GetAudioCfg", "GetAudioAlarmV20", "GetIsp", "GetAiCfg":
+			w.Write([]byte(`[{"cmd":"` + r.URL.Query().Get("cmd") + `","code":1,"error":{"detail":"not support","rspCode":-9}}]`))
 		default:
 			t.Errorf("unexpected cmd %q", r.URL.Query().Get("cmd"))
 		}
@@ -142,7 +157,7 @@ func TestServeApplyFloodlightWritesThroughCGIAndReachesTheCamera(t *testing.T) {
 		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("got %d, want 303: %s", resp.StatusCode, raw)
 	}
-	if got := resp.Header.Get("Location"); got != "/cameras/cam1" {
+	if got := resp.Header.Get("Location"); got != "/cameras/cam1/settings/lights" {
 		t.Fatalf("redirected to %q, want the camera page the floodlight control lives on", got)
 	}
 	banner := takenFlash(t, s, resp)
@@ -239,7 +254,7 @@ func TestServeSettingsRendersLightsAndIRWithAConfirmReason(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/cameras/cam1")
+	resp, err := http.Get(ts.URL + "/cameras/cam1/settings/lights")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,16 +268,9 @@ func TestServeSettingsRendersLightsAndIRWithAConfirmReason(t *testing.T) {
 	}
 	html := string(raw)
 
-	for _, want := range []string{"Lights and IR", "Status LED", "Floodlight", lightsConfirmReason, irLivesInImageWarning} {
+	for _, want := range []string{"Lights", "Infrared light", "Status LED", "Floodlight", lightsConfirmReason} {
 		if !strings.Contains(html, want) {
 			t.Errorf("page does not render %q", want)
-		}
-	}
-	// The Picture and OSD group from Task 7 must still be here: appending
-	// the new group must not have dropped it.
-	for _, want := range []string{"Camera name and overlay", "Camera name", "Image", "Brightness"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("page no longer renders the Picture and OSD group's %q", want)
 		}
 	}
 	// The floodlight option seeded as current ("motion", from mode 1 state

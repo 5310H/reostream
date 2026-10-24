@@ -123,7 +123,10 @@ func TestDefaultsComeFromTheCamerasOwnInitialValues(t *testing.T) {
 				`"initial":{"Image":{"bright":128,"contrast":128,"saturation":128,"hue":128}}}]`))
 		case "GetOsd":
 			w.Write([]byte(`[{"cmd":"GetOsd","code":0,"value":{},` +
-				`"initial":{"Osd":{"osdChannel":{"enable":1,"pos":"Lower Right"},"osdTime":{"enable":1,"pos":"Top Center"}}}}]`))
+				`"initial":{"Osd":{"osdChannel":{"enable":1,"pos":"LowerRight"},"osdTime":{"enable":1,"pos":"TopCenter"},"watermark":1}}}]`))
+		case "GetIsp":
+			w.Write([]byte(`[{"cmd":"GetIsp","code":0,"value":{},` +
+				`"initial":{"Isp":{"dayNight":"Auto","mirroring":0,"rotation":0}}}]`))
 		default:
 			w.Write([]byte(`[{"cmd":"x","code":1,"error":{"detail":"not supported","rspCode":-9}}]`))
 		}
@@ -141,15 +144,17 @@ func TestDefaultsComeFromTheCamerasOwnInitialValues(t *testing.T) {
 		"OsdChannelName/enable":   "1",
 		"OsdChannelName/topLeftX": osdFarEdge + "," + osdFarEdge,
 		"OsdDatetime/enable":      "1",
+		// Spelled as an RLC-810A sends them: "LowerRight", "TopCenter".
+		"OsdDatetime/topLeftX":          osdCenter + "," + osdNearEdge,
+		"OsdChannelName/enWatermark":    "1",
+		"InputAdvanceCfg/DayNight/mode": "auto",
+		"InputAdvanceCfg/mirror":        "0",
+		"InputAdvanceCfg/flip":          "0",
 	}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("default for %s = %q, want %q", k, got[k], v)
 		}
-	}
-	// Top centre has no corner in the Baichuan table: no reset, not a guess.
-	if v, ok := got["OsdDatetime/topLeftX"]; ok {
-		t.Errorf("a centred default was mapped to %q", v)
 	}
 
 	bright := Field{XPath: "VideoInput/bright", Kind: "number"}

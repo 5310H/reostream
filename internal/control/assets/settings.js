@@ -6,75 +6,81 @@
 // overlay that is not drawn is a write with no effect.
 
 (function () {
-  // Submits through the form's own onsubmit, so a confirmation the form
-  // asks for still comes first. form.submit() would skip it.
+  // Saving. Every form on a settings page posts in the background and the
+  // result shows as a short note; nothing reloads and no control is
+  // redrawn, so the live preview keeps playing and the row stays put.
   //
-  // requestSubmit runs the inline onsubmit; if that cancelled, the event
-  // arrives already defaultPrevented and nothing is sent. Otherwise this
-  // cancels the navigation itself and posts the same form by fetch, so the
-  // live tile survives a save.
+  // send() goes through requestSubmit, so a form's own confirm still comes
+  // first; a cancelled confirm puts the control back.
   function send(form, undo) {
-    form.addEventListener('submit', function once(e) {
-      form.removeEventListener('submit', once);
-      if (e.defaultPrevented) {
-        if (undo) undo();
-        return;
-      }
-      e.preventDefault();
-      post(form, undo);
-    });
+    form._undo = undo;
     form.requestSubmit();
   }
 
-  // Posts the form and swaps in the parts of the reply that can have
-  // changed. Anything this cannot do in place falls back to navigating,
-  // because a save whose result is never shown is worse than a reload.
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.closest('.cam-pane') || form.hasAttribute('data-nav')) return;
+    var undo = form._undo;
+    form._undo = null;
+    if (e.defaultPrevented) {
+      if (undo) undo();
+      return;
+    }
+    e.preventDefault();
+    post(form, undo);
+  });
+
+  var note = null, noteTimer = null;
+  function say(text, bad) {
+    if (!note) {
+      note = document.createElement('div');
+      note.className = 'save-note';
+      note.setAttribute('role', 'status');
+      document.body.appendChild(note);
+    }
+    note.textContent = text;
+    note.classList.toggle('bad', !!bad);
+    note.classList.add('show');
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () { note.classList.remove('show'); }, bad ? 6000 : 2200);
+  }
+
   function post(form, undo) {
-    var body = new URLSearchParams(new FormData(form));
+    say('Saving\u2026');
     fetch(form.action || location.pathname, {
       method: 'POST',
-      body: body,
+      body: new URLSearchParams(new FormData(form)),
       headers: {'Accept': 'text/html'},
       credentials: 'same-origin'
     }).then(function (resp) {
-      if (!resp.ok) throw new Error('status ' + resp.status);
+      if (!resp.ok) return resp.text().then(function (t) { throw new Error(t.trim() || ('status ' + resp.status)); });
       return resp.text();
     }).then(function (html) {
       var doc = new DOMParser().parseFromString(html, 'text/html');
-      if (!swap(doc)) {
-        location.reload();
-        return;
-      }
-      wire();
-    }).catch(function () {
-      // The write may still have happened, so the page has to be told the
-      // truth by the server rather than guessed at here.
+      var flash = doc.querySelector('.flash');
+      var refused = flash && flash.classList.contains('flash-refused');
+      if (refused && undo) undo();
+      var text = flash ? flash.querySelector('.flash-text').textContent.trim() : 'Saved';
+      say(refused || form.hasAttribute('data-report') ? text : 'Saved', refused);
+      if (!refused) refresh(form, doc);
+      governs();
+    }).catch(function (err) {
       if (undo) undo();
-      location.reload();
+      say('Not saved: ' + err.message, true);
+      governs();
     });
   }
 
-  // Replaces the settings sections and the flash from a freshly rendered
-  // copy of this page. The camera card is left alone: the video element is
-  // inside it, and replacing it is exactly what this exists to avoid.
-  function swap(doc) {
-    var to = document.querySelectorAll('.camera-cols section');
-    var from = doc.querySelectorAll('.camera-cols section');
-    if (!to.length || to.length !== from.length) return false;
-    for (var i = 0; i < to.length; i++) {
-      to[i].replaceWith(from[i]);
-    }
-    var oldFlash = document.querySelector('.flash');
-    var newFlash = doc.querySelector('.flash');
-    if (oldFlash && newFlash) {
-      oldFlash.replaceWith(newFlash);
-    } else if (newFlash) {
-      var cols = document.querySelector('.camera-cols');
-      if (cols && cols.parentNode) cols.parentNode.insertBefore(newFlash, cols);
-    } else if (oldFlash) {
-      oldFlash.remove();
-    }
-    return true;
+  // A switch names the setting it governs with data-governs; that row is
+  // dimmed while the switch is off.
+  function governs() {
+    document.querySelectorAll('.switch[data-governs]').forEach(function (sw) {
+      var row = document.getElementById(sw.dataset.governs);
+      if (!row) return;
+      var off = sw.getAttribute('aria-pressed') !== 'true';
+      row.classList.toggle('off', off);
+      row.querySelectorAll('select, button, input').forEach(function (el) { el.disabled = off; });
+    });
   }
 
   // Every binding below runs again after a save swaps the settings
@@ -82,11 +88,29 @@
   // with no handler looks identical to one that works until it is
   // pressed. The camera tile is bound outside this, because it is not
   // swapped and must keep the player it already has.
-  function wire() {
+  // refresh puts the row the camera now reports in place of the one that
+  // was saved, so its changed-from-factory dot and reset button say what
+  // is true after the save, not before it. The reply to a save is the
+  // settings page read fresh from the camera; the same form is found in it
+  // by its action and its position among forms sharing that action.
+  function refresh(form, doc) {
+    var action = form.getAttribute('action');
+    if (!action) return;
+    var mine = Array.prototype.indexOf.call(document.querySelectorAll('form[action="' + action + '"]'), form);
+    var fresh = doc.querySelectorAll('form[action="' + action + '"]')[mine];
+    if (mine < 0 || !fresh) return;
+    var node = document.importNode(fresh, true);
+    form.replaceWith(node);
+    wire(node);
+    masters();
+  }
+
+  function wire(root) {
+    root = root || document;
     // A switch writes 1 or 0 into its field (value, unless data-field names
     // another) and saves, unless data-hold says the form's own set button
     // does that.
-    document.querySelectorAll('.switch').forEach(function (sw) {
+    root.querySelectorAll('.switch').forEach(function (sw) {
       sw.addEventListener('click', function () {
         var on = sw.getAttribute('aria-pressed') === 'true';
         var form = sw.closest('form');
@@ -103,7 +127,7 @@
     });
 
     // Stops (an overlay's corner, the floodlight): choosing one saves it.
-    document.querySelectorAll('.segmented').forEach(function (group) {
+    root.querySelectorAll('.segmented').forEach(function (group) {
       var was = group.querySelector('input:checked');
       group.querySelectorAll('input[type=radio]').forEach(function (radio) {
         radio.addEventListener('change', function () {
@@ -118,7 +142,7 @@
 
     // Reset: put the camera's factory value into whatever control this form
     // posts through, then save it the same way that control would.
-    document.querySelectorAll('.reset[data-default]').forEach(function (btn) {
+    root.querySelectorAll('.reset[data-default]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var form = btn.closest('form');
         if (!form) return;
@@ -149,58 +173,99 @@
       });
     });
 
-    // A switch names the setting it governs with data-governs; that row is
-    // dimmed while the switch is off.
-    document.querySelectorAll('.switch[data-governs]').forEach(function (sw) {
-      var row = document.getElementById(sw.dataset.governs);
-      if (!row) return;
-      var off = sw.getAttribute('aria-pressed') !== 'true';
-      row.classList.toggle('off', off);
-      row.querySelectorAll('select, button, input').forEach(function (el) { el.disabled = off; });
-    });
+    governs();
 
     // Keeps each slider and its number box showing the same value. The box
     // is authoritative -- it is the input that posts -- so the slider
     // follows it only when the typed value is one the track can represent;
     // a value outside the track is left exactly as typed.
-    document.querySelectorAll('.slider').forEach(function (wrap) {
+    root.querySelectorAll('.slider').forEach(function (wrap) {
       var range = wrap.querySelector('input[type=range]');
       var box = wrap.querySelector('input[type=number]');
       if (!range || !box) return;
+      var saved = box.value;
+      var save = function () {
+        if (box.value === saved || !box.form) return;
+        var before = saved;
+        saved = box.value;
+        send(box.form, function () { box.value = before; range.value = before; saved = before; });
+      };
       range.addEventListener('input', function () { box.value = range.value; });
+      range.addEventListener('change', save);
       box.addEventListener('input', function () {
         var v = Number(box.value);
         if (box.value !== '' && !isNaN(v) && v >= Number(range.min) && v <= Number(range.max)) range.value = box.value;
       });
+      box.addEventListener('change', save);
     });
 
-    // The per-section reset. It does not know how to write anything: it
-    // clicks the rows' own reset buttons, so a reset is one code path
-    // whether it came from a row or from the heading. It appears only in
-    // sections that have something to put back, and says how many, because
-    // "reset section" with no number is a button nobody can predict.
-    document.querySelectorAll('section').forEach(function (section) {
-      var master = section.querySelector('.section-reset');
-      if (!master) return;
-      var rows = section.querySelectorAll('.reset[data-default]');
-      if (!rows.length) return;
-      master.hidden = false;
-      master.textContent = '↺ reset ' + rows.length +
-        (rows.length === 1 ? ' setting' : ' settings') + ' to factory';
-      master.addEventListener('click', function () {
-        var heading = section.querySelector('h2');
-        var name = heading ? heading.textContent.trim() : 'this section';
-        if (!confirm('Put ' + rows.length + ' ' + name.toLowerCase() +
-            (rows.length === 1 ? ' setting' : ' settings') +
-            ' back to the camera’s factory values?')) {
-          return;
-        }
-        rows.forEach(function (btn) { btn.click(); });
+    // A dropdown saves when a new value is picked.
+    root.querySelectorAll('.autosave select').forEach(function (sel) {
+      var saved = sel.value;
+      sel.addEventListener('change', function () {
+        var before = saved;
+        saved = sel.value;
+        send(sel.form, function () { sel.value = before; saved = before; });
+      });
+    });
+
+    // Text and number fields save when they lose focus or on Enter.
+    root.querySelectorAll('.autosave input[type=text], .autosave input[type=number]:not(.slider-box)').forEach(function (input) {
+      var saved = input.value;
+      input.addEventListener('change', function () {
+        if (input.value === saved) return;
+        var before = saved;
+        saved = input.value;
+        send(input.form, function () { input.value = before; saved = before; });
+      });
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
       });
     });
   }
 
+  // The per-section reset. It does not know how to write anything: it
+  // clicks the rows' own reset buttons, so a reset is one code path
+  // whether it came from a row or from the heading. It appears only in
+  // sections that have something to put back, and the rows are looked up
+  // on each click, since a save can change which rows have one.
+  document.querySelectorAll('section').forEach(function (section) {
+    var master = section.querySelector('.section-reset');
+    if (!master) return;
+    master.textContent = '↺ Reset section';
+    master.addEventListener('click', function () {
+      var heading = section.querySelector('h2');
+      var name = heading ? heading.textContent.trim() : 'this section';
+      if (!confirm('Reset ' + name + ' to factory?')) {
+        return;
+      }
+      section.querySelectorAll('.reset[data-default]').forEach(function (btn) { btn.click(); });
+    });
+  });
+
+  function masters() {
+    document.querySelectorAll('section').forEach(function (section) {
+      var master = section.querySelector('.section-reset');
+      if (master) master.hidden = !section.querySelector('.reset[data-default]');
+    });
+  }
+
   wire();
+  masters();
+
+  // Copy to other cameras: the link opens the panel, "All" ticks every box.
+  document.querySelectorAll('.copy-open').forEach(function (b) {
+    var panel = b.closest('section').querySelector('.copy-panel');
+    if (!panel) return;
+    b.addEventListener('click', function () {
+      panel.hidden = !panel.hidden;
+      b.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+    });
+    var all = panel.querySelector('[data-all]');
+    all.addEventListener('change', function () {
+      panel.querySelectorAll('input[name=to]').forEach(function (c) { c.checked = all.checked; });
+    });
+  });
 
 
   // The single camera tile, same discipline as the dashboard: nothing
@@ -228,8 +293,67 @@
 
   if (container.dataset.autoplay) {
     video.muted = true;
-    start(true);
+    // The settings preview is a picture to judge by, not a player.
+    start(!container.closest('.sec-preview'));
   } else if (btn) {
     btn.addEventListener('click', function () { start(true); });
+  }
+})();
+
+
+// Lens alignment: the reset controls.
+//
+// Three fields, and two different senses of "undo" that answer different
+// questions. The per-field arrow and the Factory button put back the
+// camera's own shipped value, which is where to go when nudging has gone
+// far enough wrong that "before" is not far enough back. Revert puts back
+// what the camera actually held when this page was drawn, which is what
+// somebody wants after a few nudges that lost track of the starting point.
+//
+// Each fills the form in and saves it, the same as any other control.
+(function () {
+  'use strict';
+
+  var note = document.getElementById('stitch-note');
+  function say(msg) {
+    if (!note) return;
+    note.textContent = msg;
+  }
+
+  // One field, from the arrow beside it.
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.stitch-reset');
+    if (!b) return;
+    var input = document.getElementById(b.dataset.target);
+    if (!input) return;
+    input.value = b.dataset.value;
+    say('');
+    var f = input.form; if (f) f.requestSubmit();
+  });
+
+  // All three at once, from either button. Both carry their values as data
+  // attributes rendered by the template, so this needs no knowledge of what
+  // the camera reported.
+  function applyAll(b, what) {
+    ['distance', 'x', 'y'].forEach(function (f) {
+      var input = document.getElementById('st-' + f);
+      if (input && b.dataset[f] !== undefined) input.value = b.dataset[f];
+    });
+    say('');
+    var f = b.closest('form'); if (f) f.requestSubmit();
+  }
+
+  var revert = document.getElementById('stitch-revert');
+  if (revert) {
+    revert.addEventListener('click', function () {
+      applyAll(revert, 'back to the values this page opened with');
+    });
+  }
+
+  var factory = document.getElementById('stitch-factory');
+  if (factory) {
+    factory.addEventListener('click', function () {
+      applyAll(factory, 'back to the factory alignment');
+    });
   }
 })();

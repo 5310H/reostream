@@ -116,6 +116,8 @@ type PairRow struct {
 type blocksPage struct {
 	Title  string
 	Camera Camera
+	// Head is the camera shell (camshell.go).
+	Head camHead
 
 	Blocks []Block
 	Pairs  []PairRow
@@ -221,6 +223,7 @@ func (s *Server) serveBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := blocksPage{Title: cam.Name + " blocks", Camera: cam}
+	page.Head = s.camHeadFor(r.Context(), cam, "settings", "advanced")
 
 	blocks, err := s.readBlocks(r.Context(), cam)
 	page.Blocks = blocks

@@ -35,6 +35,8 @@ import (
 type accountsPage struct {
 	Title  string
 	Camera Camera
+	// Head is the camera shell (camshell.go).
+	Head camHead
 
 	XML string
 	Err string
@@ -52,6 +54,7 @@ func (s *Server) serveAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := accountsPage{Title: cam.Name + " accounts", Camera: cam}
+	page.Head = s.camHeadFor(r.Context(), cam, "settings", "accounts")
 
 	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
 	defer cancel()

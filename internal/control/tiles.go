@@ -3,6 +3,7 @@ package control
 import (
 	"sort"
 	"strings"
+	"time"
 )
 
 // browserPlayable is the codec set a browser will decode from an MPEG-TS
@@ -81,6 +82,17 @@ type tile struct {
 	// one a browser can play. Pressing a tile steps up to it: same camera,
 	// a picture worth looking at, and only one of them at a time.
 	ExternURL string
+	// Caption says why there is no picture when Playable is false.
+	Caption string
+	// Battery marks a camera that sleeps: URL wakes it, so the tile plays
+	// it only when pressed, and Still is its last picture, served without
+	// waking it ("" before its first wake).
+	Battery bool
+	Still   string
+	// StillNote says the picture is not live: "Asleep · last picture 10:42".
+	StillNote string
+	// Level is the battery percentage, -1 before the first reading.
+	Level int
 }
 
 // streamPrefix is where control.go mounts the streaming handler on this
@@ -110,6 +122,22 @@ func (s *Server) tiles() []tile {
 	sort.Strings(names)
 	out := make([]tile, 0, len(names))
 	for _, cam := range names {
+		if s.onDemand(cam) {
+			// Always through this page's own signed-in mount: the public
+			// listener refuses a battery camera's stream.
+			t := tile{Camera: cam, Battery: true, Playable: true, Level: -1, URL: streamPrefix + "/" + cam + "_sub.ts"}
+			if byCam[cam]["sub"] != "" {
+				t.Still = streamPrefix + "/" + cam + "_sub.still.ts"
+				t.StillNote = "Asleep"
+				if h, ok := s.opts.Hubs.Hub(cam + "/sub"); ok {
+					if at := h.KeyframeAt(); !at.IsZero() {
+						t.StillNote += " · last picture " + stillTime(at, time.Now())
+					}
+				}
+			}
+			out = append(out, t)
+			continue
+		}
 		path, ok := playableStream(cam, byCam[cam])
 		t := tile{
 			Camera:   cam,
@@ -125,4 +153,22 @@ func (s *Server) tiles() []tile {
 		out = append(out, t)
 	}
 	return out
+}
+
+// onDemand reports a battery camera, whose streams run only while watched.
+func (s *Server) onDemand(camera string) bool {
+	if s.opts.Hubs == nil {
+		return false
+	}
+	h, ok := s.opts.Hubs.Hub(camera + "/sub")
+	return ok && h.OnDemand()
+}
+
+// stillTime is when a still was taken, as short as it can be read: the
+// time today, else the day and time.
+func stillTime(at, now time.Time) string {
+	if at.Format("2006-01-02") == now.Format("2006-01-02") {
+		return at.Format("15:04")
+	}
+	return at.Format("Jan 2 15:04")
 }

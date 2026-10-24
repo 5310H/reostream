@@ -72,6 +72,7 @@ func (s *Server) dial(ctx context.Context, cam Camera) (*baichuan.Conn, error) {
 	return baichuan.Dial(ctx, cam.Address, baichuan.Options{
 		Username: cam.Username,
 		Password: cam.Password,
+		UID:      cam.UID,
 	})
 }
 

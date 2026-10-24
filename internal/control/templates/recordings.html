@@ -1,0 +1,48 @@
+{{define "body"}}
+{{template "camhead" .Head}}
+{{if .Err}}<p class="outcome-refused">{{.Err}}</p>{{end}}
+{{if .CardSkipped}}<p class="hint">Showing clips saved here. <a href="?card=1{{if not .Day.IsZero}}&amp;day={{.Day.Format "2006-01-02"}}{{end}}">Also show clips on the camera's card</a> (wakes the camera).</p>{{end}}
+{{if not .Days}}{{if not .Err}}<p class="hint">No recordings on the card.</p>{{end}}
+{{else}}
+<div class="rec-days" role="tablist" aria-label="Day">
+{{$day := .Day}}{{$card := .Card}}{{range .Days}}<a href="?day={{.Format "2006-01-02"}}{{if $card}}&amp;card=1{{end}}"{{if .Equal $day}} aria-current="page"{{end}}><span>{{.Format "Mon"}}</span><b>{{.Format "Jan 2"}}</b></a>{{end}}
+</div>
+
+<div class="rec-grid">
+<div class="rec-main">
+<div class="live-player rec-player" id="rec-player" data-camera="{{.Cam}}">
+<video controls playsinline hidden></video>
+<p class="live-empty" id="rec-empty">{{if .Clips}}Pick a clip.{{else}}No clips this day.{{end}}</p>
+</div>
+<div class="rec-bar">
+<button type="button" class="quiet" id="rec-prev" aria-label="Previous clip">&#8249; Prev</button>
+<span class="mono" id="rec-now"></span>
+<button type="button" class="quiet" id="rec-next" aria-label="Next clip">Next &#8250;</button>
+<div class="seg rec-stream" role="radiogroup" aria-label="Stream">
+<button type="button" class="seg-opt" data-stream="sub" aria-checked="true">Sub</button>
+<button type="button" class="seg-opt" data-stream="main" aria-checked="false">Main</button>
+</div>
+<a class="button quiet" id="rec-dl" href="#" hidden download>Download</a>
+</div>
+
+<div class="rec-timeline" aria-label="The day, midnight to midnight">
+{{range $i, $c := .Clips}}<button type="button" class="rec-span kind-{{$c.Kind}}" style="left:{{printf "%.3f" $c.Left}}%;width:{{printf "%.3f" $c.Width}}%" data-i="{{$i}}" aria-label="{{$c.Start.Format "15:04:05"}} {{$c.Kind}}"></button>{{end}}
+</div>
+<div class="rec-hours"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+</div>
+
+<aside class="rec-list">
+<div class="rec-kinds">
+{{range .Kinds}}<button type="button" class="seg-toggle kind-chip kind-{{.}}" data-kind="{{.}}" aria-pressed="true"><span class="kd"></span>{{.}}</button>{{end}}
+</div>
+<ol id="rec-clips">
+{{range $i, $c := .Clips}}<li><button type="button" class="rec-clip kind-{{$c.Kind}}" data-i="{{$i}}" data-kind="{{$c.Kind}}" data-start="{{$c.StartParam}}" data-end="{{$c.EndParam}}" data-audio="{{if $c.HasAudio}}1{{else}}0{{end}}"{{if $c.Saved}} data-saved="{{$c.Rel}}"{{end}}>
+<span class="kd"></span><span class="mono">{{$c.Start.Format "15:04:05"}}</span><span class="dim">{{$c.Seconds}}s</span><span class="rec-type">{{$c.Kind}}</span></button></li>{{end}}
+</ol>
+</aside>
+</div>
+<script src="/assets/mpegts.js"></script>
+<script src="/assets/snapshot.js"></script>
+<script src="/assets/rec.js"></script>
+{{end}}
+{{end}}

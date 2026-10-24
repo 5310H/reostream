@@ -149,14 +149,28 @@ func (c *Client) login(ctx context.Context) error {
 	return nil
 }
 
-// Close logs out. Cameras allow only a few CGI sessions and hold abandoned
-// ones for minutes, after which every login fails with "max session".
-// Safe to call on a nil or closed client.
+// Close hands the session back to the camera.
+//
+// This is not housekeeping, it is the difference between a UI that works
+// and one that stops: a Reolink camera allows only a handful of concurrent
+// CGI logins, and it holds an abandoned one until its own timeout, which is
+// minutes. Every page that reads a setting dials a client, so without this
+// a few minutes of ordinary browsing exhausts the camera and every
+// subsequent read fails with "max session" -- at which point the camera
+// also refuses the Reolink app and its own web UI, not just this one.
+//
+// Failures are returned but rarely worth acting on: the session is being
+// dropped either way, and a Logout that did not arrive is exactly the leak
+// that would have happened anyway. Safe on a nil or already-closed client
+// so it can sit under an unconditional defer.
 func (c *Client) Close() error {
 	if c == nil || c.token == "" {
 		return nil
 	}
-	// Don't use the caller's context; it's often already cancelled.
+	// Its own short bound rather than the caller's context: Close usually
+	// runs from a defer while the request that owns that context is being
+	// torn down, and a cancelled context would skip the logout -- leaking
+	// the session this call exists to return.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var out []reply

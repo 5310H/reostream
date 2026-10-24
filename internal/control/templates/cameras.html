@@ -1,54 +1,33 @@
 {{define "body"}}
-<h1>Cameras</h1>
+{{template "appsettings-open" "cameras"}}
+<p class="hint">The cameras in the config file. Add more from the Fleet page.</p>
 {{if .Error}}<p class="state-down">{{.Error}}</p>{{end}}
 {{if .ReloadNote}}<p class="state-streaming">{{.ReloadNote}}</p>{{end}}
 {{if not .Cameras}}
 <p>No cameras are configured.</p>
 {{end}}
 {{range .Cameras}}
-<div class="card">
-<h2><a href="/cameras/{{.Name}}">{{.Name}}</a></h2>
-{{$n := len .Group.Rows}}
-{{if eq $n 0}}
-<p class="pill state-unknown">no status yet</p>
-{{else}}
+<section class="camlist-item">
+<div class="sec-head"><h2><a href="/cameras/{{.Name}}">{{.Name}}</a></h2></div>
+{{if not .Group.Rows}}<p class="hint">No status yet.</p>{{end}}
 {{range .Group.Rows}}
-<p><span class="pill state-{{.State}}">{{.State}}</span>
-<span class="metric">{{printf "%.1f" .FPS}} fps</span>
-<span class="metric">{{.MbpsBitrate}} Mbps</span></p>
+<p class="camlist-stream"><span class="dot state-{{.State}}" style="background:currentColor"></span><span class="mono">{{streamOf .Name}}</span><span class="dim">{{stateLabel .State}}</span><span class="mono dim">{{printf "%.1f" .FPS}} fps &middot; {{.MbpsBitrate}} Mb</span></p>
 {{end}}
-{{end}}
-<form method="post" action="/cameras/add">
+<form class="camlist-form" method="post" action="/cameras/add">
 <input type="hidden" name="name" value="{{.Name}}">
-<label>Address <input name="address" value="{{.Address}}"></label>
-<label>Username <input name="username" value="{{.Username}}"></label>
-<label>Password <input type="password" name="password" value="{{$.Unchanged}}"
-  placeholder="unchanged"></label>
-<fieldset><legend>Streams</legend>
+<div class="camlist-fields">
+<label class="field"><span class="label">Address</span><input name="address" value="{{.Address}}"></label>
+<label class="field"><span class="label">Username</span><input name="username" value="{{.Username}}"></label>
+<label class="field"><span class="label">Password</span><input type="password" name="password" value="" placeholder="unchanged" autocomplete="new-password"></label>
+</div>
+<div class="camlist-streams" role="group" aria-label="Streams">
+<span class="label">Streams</span>
 {{$cam := .}}
-{{range $.AllStreams}}
-<label><input type="checkbox" name="streams" value="{{.}}"
-  {{if $cam.HasStream .}}checked{{end}}> {{.}}</label>
-{{end}}
-</fieldset>
+{{range .Streams}}<label><input type="checkbox" name="streams" value="{{.}}"{{if $cam.HasStream .}} checked{{end}}> {{.}}</label>{{end}}
+</div>
 <button type="submit">Save and apply</button>
 </form>
-</div>
+</section>
 {{end}}
-
-<div class="card">
-<h2>Add a camera</h2>
-<form method="post" action="/cameras/add">
-<label>Name <input name="name"></label>
-<label>Address <input name="address"></label>
-<label>Username <input name="username" value="admin"></label>
-<label>Password <input type="password" name="password"></label>
-<fieldset><legend>Streams</legend>
-{{range .AllStreams}}
-<label><input type="checkbox" name="streams" value="{{.}}"> {{.}}</label>
-{{end}}
-</fieldset>
-<button type="submit">Add</button>
-</form>
-</div>
+{{template "appsettings-close"}}
 {{end}}

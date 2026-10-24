@@ -12,6 +12,7 @@ import (
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
 	"github.com/VoltTech21/reostream/internal/config"
+	"github.com/VoltTech21/reostream/internal/stream"
 )
 
 // serveProbe asks a camera what it is and renders the answer as a fragment
@@ -83,6 +84,15 @@ type CameraReport struct {
 	Model   string
 	Streams []StreamReport
 	Err     string
+	// ServicesEnabled is set when the probe turned on RTSP (plus ONVIF and
+	// the camera's own web page) on a camera that had them off, so a
+	// recorder and a second lens can reach it without any manual step.
+	ServicesEnabled bool
+	// Channels is how many lenses the camera reports. More than one means a
+	// dual-lens camera (a TrackMix, say): this probe reads the first lens,
+	// and the page says where the others are, since on these cameras the
+	// zoom lens is reachable only over RTSP, never this protocol.
+	Channels int
 }
 
 // probeTimeout bounds one setup probe. A sweep is not being run here: one
@@ -267,7 +277,20 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 		log.Printf("control: probe %s: support read: %v", addr, supErr)
 	}
 
-	rep := CameraReport{Model: modelName(conn, sup)}
+	rep := CameraReport{Model: modelName(conn, sup), Channels: sup.Support.ChannelNum}
+
+	// Turn on the services a non-technical user would otherwise have to find
+	// in a desktop app: RTSP so a recorder can pull the camera (and the only
+	// way to reach a second/zoom lens), ONVIF for PTZ, and the web page.
+	// Harmless when already on, and reported so the user knows it happened.
+	svcCtx, svcCancel := context.WithTimeout(ctx, 3*time.Second)
+	if changed, err := conn.EnableServices(svcCtx, baichuan.UsefulServices); err != nil {
+		log.Printf("control: probe %s: enable services: %v", addr, err)
+	} else if changed {
+		rep.ServicesEnabled = true
+	}
+	svcCancel()
+
 	anyPresent := false
 	for _, name := range []string{"main", "sub", "extern"} {
 		if name == "extern" && !sup.HasExternStream() {
@@ -285,6 +308,16 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 		}
 		rep.Streams = append(rep.Streams, sr)
 	}
+	// A second lens the camera only serves over its own RTSP server (the
+	// TrackMix zoom). Only reported when the camera answers for it.
+	if opts.Channel == 0 && opts.UID == "" {
+		zctx, zcancel := context.WithTimeout(ctx, 4*time.Second)
+		if codec, w, h, err := stream.NativeInfo(zctx, addr, opts.Username, opts.Password, "zoom"); err == nil {
+			rep.Streams = append(rep.Streams, StreamReport{Name: "zoom", Codec: codec, Width: w, Height: h})
+		}
+		zcancel()
+	}
+
 	if !anyPresent {
 		rep.Err = "logged in, but no stream on this camera could be confirmed (see detail below)"
 		if supErr != nil {
@@ -368,8 +401,9 @@ func describeDialError(err error) string {
 // probeJSON is /setup/probe's answer to the setup page: the streams that
 // can be pulled, each with one line saying what it is, or an error.
 type probeJSON struct {
-	Error   string            `json:"error,omitempty"`
-	Streams []probeJSONStream `json:"streams"`
+	Error           string            `json:"error,omitempty"`
+	Streams         []probeJSONStream `json:"streams"`
+	ServicesEnabled bool              `json:"services_enabled,omitempty"`
 }
 
 type probeJSONStream struct {
@@ -378,7 +412,7 @@ type probeJSONStream struct {
 }
 
 func writeProbeJSON(w http.ResponseWriter, rep CameraReport) {
-	out := probeJSON{Streams: []probeJSONStream{}}
+	out := probeJSON{Streams: []probeJSONStream{}, ServicesEnabled: rep.ServicesEnabled}
 	var skipped []string
 	for _, st := range rep.Streams {
 		switch {

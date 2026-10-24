@@ -23,6 +23,8 @@ const (
 	MsgIDTalkConfig  = 201
 	MsgIDTalk        = 202
 	MsgIDAbilityInfo = 151
+	// MsgIDKeepAlive is the battery camera's keepalive; see docs/udp.md.
+	MsgIDKeepAlive = 234
 )
 
 // Message classes. The class determines the header length.

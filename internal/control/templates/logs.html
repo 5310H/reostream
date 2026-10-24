@@ -1,41 +1,102 @@
 {{define "body"}}
-<h1>Logs</h1>
-<p class="subtitle">Live from the daemon. Filter by camera.</p>
-<div class="card">
+<div class="pagehead"><h1>Logs</h1></div>
+<div class="logbar">
 <div class="filters" id="filters">
-<button type="button" data-filter="" aria-pressed="true">all</button>
-{{range fleet}}<button type="button" data-filter="{{.Name}}" aria-pressed="false">{{.Name}}</button>{{end}}
+<button type="button" data-src="" aria-pressed="true">All</button>
+<button type="button" data-src="@reostream" aria-pressed="false">reostream</button>
+{{range fleet}}<button type="button" data-src="{{.Name}}" aria-pressed="false">{{.Name}}</button>{{end}}
 </div>
-<pre class="log" id="log"></pre>
+<div class="logtools">
+<input type="search" id="log-q" placeholder="Search" aria-label="Search the log">
+<button type="button" class="seg-toggle" id="log-prob" aria-pressed="false">Problems only</button>
+<button type="button" class="seg-toggle" id="log-follow" aria-pressed="true">Following</button>
+<button type="button" class="quiet" id="log-copy">Copy</button>
+<button type="button" class="quiet" id="log-dl">Download</button>
+<button type="button" class="quiet" id="log-clear">Clear</button>
 </div>
+</div>
+<button type="button" class="linkish" id="log-earlier" hidden>Show earlier lines</button>
+<div class="log" id="log" role="log" aria-live="off"></div>
 <script>
-// The filter is a row of chips rather than a text box: on a fleet the
-// thing being filtered for is almost always a camera name, and the names
-// are already known to this page.
 (function () {
-  var log = document.getElementById('log');
-  var filter = '';
-  var lines = [];
+  var box = document.getElementById('log'), q = document.getElementById('log-q');
+  var probBtn = document.getElementById('log-prob'), follow = document.getElementById('log-follow');
+  var earlier = document.getElementById('log-earlier');
+  var cams = Array.prototype.map.call(document.querySelectorAll('#filters [data-src]'), function (b) { return b.dataset.src; })
+    .filter(function (s) { return s && s[0] !== '@'; });
+  var lines = [], src = '', clearedAt = 0, following = true, pending = false;
+  var PROB = /error|fail|refused|timeout|timed out|denied|lost|reconnect|restart|unauthori|cannot|could not|panic|warn/i;
+  var MAX = 3000;
 
-  function render() {
-    log.textContent = lines.filter(function (l) { return !filter || l.indexOf(filter) !== -1; }).join('\n') + '\n';
-    log.scrollTop = log.scrollHeight;
+  function match(l) {
+    if (src === '@reostream') { if (cams.some(function (c) { return l.indexOf(c) !== -1; })) return false; }
+    else if (src && l.indexOf(src) === -1) return false;
+    if (probBtn.getAttribute('aria-pressed') === 'true' && !PROB.test(l)) return false;
+    var t = q.value.trim().toLowerCase();
+    return !t || l.toLowerCase().indexOf(t) !== -1;
   }
-
-  function add(line) { lines.push(line); render(); }
+  function visible() { return lines.slice(clearedAt).filter(match).slice(-MAX); }
+  function render() {
+    pending = false;
+    var frag = document.createDocumentFragment();
+    visible().forEach(function (l) {
+      var d = document.createElement('div');
+      d.className = PROB.test(l) ? 'll prob' : 'll';
+      d.textContent = l;
+      frag.appendChild(d);
+    });
+    box.replaceChildren(frag);
+    if (!box.childNodes.length) { var e = document.createElement('div'); e.className = 'll empty'; e.textContent = 'No lines.'; box.appendChild(e); }
+    if (following) box.scrollTop = box.scrollHeight;
+    earlier.hidden = clearedAt === 0;
+  }
+  function later() { if (!pending) { pending = true; requestAnimationFrame(render); } }
+  function setFollow(on) {
+    following = on;
+    follow.setAttribute('aria-pressed', on ? 'true' : 'false');
+    follow.textContent = on ? 'Following' : 'Paused';
+    if (on) box.scrollTop = box.scrollHeight;
+  }
 
   document.querySelectorAll('#filters button').forEach(function (b) {
     b.addEventListener('click', function () {
-      filter = b.dataset.filter;
-      document.querySelectorAll('#filters button').forEach(function (o) {
-        o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
-      });
+      src = b.dataset.src;
+      document.querySelectorAll('#filters button').forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
       render();
     });
   });
+  q.addEventListener('input', later);
+  probBtn.addEventListener('click', function () {
+    probBtn.setAttribute('aria-pressed', probBtn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true'); render();
+  });
+  follow.addEventListener('click', function () { setFollow(!following); });
+  // Scrolling up to read pauses; scrolling back to the bottom follows again.
+  box.addEventListener('scroll', function () {
+    var atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    if (atEnd !== following) setFollow(atEnd);
+  });
+  document.getElementById('log-clear').addEventListener('click', function () { clearedAt = lines.length; render(); });
+  earlier.addEventListener('click', function () { clearedAt = 0; render(); });
+  document.getElementById('log-copy').addEventListener('click', function (e) {
+    var text = visible().join('\n'), b = e.currentTarget;
+    var done = function (ok) { b.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(function () { b.textContent = 'Copy'; }, 1400); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (x) {} ta.remove(); done(ok); }
+  });
+  document.getElementById('log-dl').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([visible().join('\n') + '\n'], {type: 'text/plain'}));
+    a.download = 'reostream-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.log';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
 
-  fetch('/logs/history').then(function (r) { return r.json(); }).then(function (ls) { lines = ls.slice(); render(); });
-  new EventSource('/logs/stream').onmessage = function (e) { add(e.data); };
+  fetch('/logs/history').then(function (r) { return r.json(); }).then(function (ls) { lines = (ls || []).concat(lines); render(); });
+  new EventSource('/logs/stream').onmessage = function (e) {
+    lines.push(e.data);
+    if (lines.length > 20000) { var cut = lines.length - 20000; lines.splice(0, cut); clearedAt = Math.max(0, clearedAt - cut); }
+    later();
+  };
 })();
 </script>
 {{end}}

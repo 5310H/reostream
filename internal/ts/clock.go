@@ -87,13 +87,24 @@ func (c *Clock) PTS(micros uint32) uint64 {
 	return pts
 }
 
-// Resume starts a new camera timeline after a reconnect. A rebooted camera
-// restarts its counter, which otherwise either freezes PTS (up to 35 min) or
-// jumps it forward (up to 71 min). RTSP sessions outlive the camera
-// connection, so they need this; the TS muxer gets a new clock per connection.
+// Resume tells the clock the camera connection was re-established and the
+// next reading starts a new camera timeline: the camera may have rebooted,
+// in which case its microsecond counter has started over from a small value.
 //
-// gap is how long the camera was gone. PTS continues from the last value
-// plus gap. Has no effect before the first frame.
+// Through the wrap detector a restart is either a backward step too small
+// to count as a wrap, which the clamp below turns into a frozen PTS until
+// the new counter passes the old one (up to 35 minutes), or a step large
+// enough to count as one, which throws the PTS forward by up to 71 minutes.
+// Both were reproduced against the RTSP output after the fleet's weekly
+// scheduled reboot. The MPEG-TS output never suffered because it builds a
+// new muxer, and so a new Clock, per connection; an RTSP session outlives
+// the camera connection and so its clock must be told.
+//
+// gap is how long the camera was away, measured by the caller on the wall
+// clock. The timeline continues from the last PTS plus that gap, so a reader
+// sees the outage as the pause it was rather than as a seek, and a recorder
+// keeps its segment timing honest. A clock that has emitted nothing yet is
+// unaffected: its first frame still maps to zero.
 func (c *Clock) Resume(gap time.Duration) {
 	if !c.started {
 		return

@@ -87,7 +87,12 @@ func (s *connectedSink) Connected() {
 	s.connected++
 }
 
-// Connected fires once per camera connection, before any of its frames.
+// An RTSP session outlives the camera connection that feeds it, so its
+// timestamp clock has to be told when that connection was re-established:
+// after a camera reboot the microsecond counter starts over, and a clock
+// that is not told either freezes or jumps (see ts.Clock.Resume). The hook
+// fires once per connection, before any frame from it, so the sink can
+// treat the next frame as a new timeline.
 func TestSinkIsToldWhenTheCameraConnects(t *testing.T) {
 	b, err := os.ReadFile("../baichuan/testdata/stream_s2c.bin")
 	if err != nil {

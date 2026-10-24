@@ -1,6 +1,8 @@
 {{define "body"}}
-<h1>Config</h1>
-<p class="subtitle">The file on disk. Saving checks it with the same parser the daemon boots with, so a broken file is refused before it is written.</p>
+{{template "appsettings-open" "config"}}
+<section>
+<div class="sec-head"><h2>Config file</h2></div>
+<p class="hint">The file on disk. Saving checks it with the same parser the daemon boots with, so a broken file is refused before it is written.</p>
 {{if .Error}}<p class="outcome-refused">{{.Error}}</p>{{end}}
 <form method="post" action="/config">
 <div class="editor">
@@ -15,4 +17,6 @@
 </div>
 </div>
 </form>
+</section>
+{{template "appsettings-close"}}
 {{end}}

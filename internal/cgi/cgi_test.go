@@ -156,7 +156,11 @@ func TestGetHonoursContextCancellation(t *testing.T) {
 	}
 }
 
-// Close must log out, or the camera runs out of sessions (rspCode -5).
+// A camera allows only a handful of concurrent CGI logins and holds an
+// abandoned one for minutes, so a session that is finished with has to be
+// handed back. The symptom when it is not: "max session (rspCode -5)" on
+// every read, from the Reolink app and the camera's own web UI as much as
+// from here, after a few minutes of ordinary browsing.
 func TestCloseHandsTheSessionBack(t *testing.T) {
 	var logouts int32
 	var sawToken string

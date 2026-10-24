@@ -38,6 +38,14 @@ func (r *Renderer) Render(w http.ResponseWriter, page string, data any) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Every page here is a reading of a camera's current settings, so a
+	// stored copy is a wrong one the moment anything writes. Without this
+	// the browser is free to answer a Back navigation from its own cache,
+	// and the page that comes back shows the values from before the write
+	// -- which reads as "my change did not save" when it did. no-store
+	// rather than no-cache: there is nothing to revalidate, and these
+	// pages are cheap to rebuild.
+	w.Header().Set("Cache-Control", "no-store")
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
 		// The response is already partly written, so the log is the only
 		// place this can go.

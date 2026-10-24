@@ -1,0 +1,115 @@
+{{define "body"}}
+{{template "appsettings-open" "nvr"}}
+{{if .Error}}<p class="outcome-refused">Could not read the config: {{.Error}}</p>{{end}}
+{{$u := .URLs}}{{$p := .}}
+<div class="seg nvr-tabs" role="tablist">
+<button type="button" role="tab" data-tab="frigate">Frigate</button>
+<button type="button" role="tab" data-tab="go2rtc">go2rtc</button>
+<button type="button" role="tab" data-tab="blueiris">Blue Iris</button>
+<button type="button" role="tab" data-tab="ha">Home Assistant</button>
+<button type="button" role="tab" data-tab="other">Other</button>
+</div>
+
+<div class="nvr-pane" data-pane="frigate">
+<section>
+<div class="sec-head"><h2>Frigate</h2><button type="button" class="linkish copy-block" data-target="frigate-snippet">Copy</button></div>
+<p class="hint">Sub detects, main records.</p>
+<pre class="snippet" id="frigate-snippet">{{$u.Frigate}}</pre>
+</section>
+<section>
+<div class="sec-head"><h2>Update my Frigate config</h2></div>
+<p class="hint">Paste your config. Cameras with the same name get reostream's inputs; the rest is kept.</p>
+<form method="post" action="/settings/nvr" data-nav>
+<textarea name="frigate" class="snippet-in" rows="10" spellcheck="false" placeholder="mqtt:&#10;  host: ...&#10;cameras:&#10;  ...">{{.Pasted}}</textarea>
+<button type="submit">Update</button>
+</form>
+{{if .MergeErr}}<p class="outcome-refused">{{.MergeErr}}</p>{{end}}
+{{if .Merged}}
+<div class="sec-head" style="margin-top:14px"><h2>Updated</h2><button type="button" class="linkish copy-block" data-target="frigate-merged">Copy</button></div>
+<p class="hint">{{with .Updated}}Updated: {{range $i, $c := .}}{{if $i}}, {{end}}{{$c}}{{end}}. {{end}}{{with .Added}}Added: {{range $i, $c := .}}{{if $i}}, {{end}}{{$c}}{{end}}.{{end}}</p>
+<pre class="snippet" id="frigate-merged">{{.Merged}}</pre>
+{{end}}
+</section>
+</div>
+
+<div class="nvr-pane" data-pane="go2rtc" hidden>
+<section>
+{{if $u.RTSPPort}}
+<div class="sec-head"><h2>go2rtc</h2><button type="button" class="linkish copy-block" data-target="go2rtc-snippet">Copy</button></div>
+<p class="hint">Also works in Frigate's go2rtc section.</p>
+<pre class="snippet" id="go2rtc-snippet">streams:
+{{range $u.Cameras}}{{$c := .}}{{range $st, $url := index $u.StreamRTSP $c}}  {{$c}}{{if ne $st "main"}}_{{$st}}{{end}}: {{$url}}
+{{end}}{{end}}</pre>
+{{else}}{{template "nvr-rtsp-off"}}{{end}}
+</section>
+</div>
+
+<div class="nvr-pane" data-pane="blueiris" hidden>
+<section>
+<div class="sec-head"><h2>Blue Iris</h2></div>
+{{if $u.RTSPPort}}
+<p class="hint">Add camera, Make: Generic/ONVIF, then for each camera:</p>
+<table class="nvr-table">
+<tr><th>Camera</th><th>Address</th><th>Main stream</th><th>Sub stream</th></tr>
+{{range $u.Cameras}}{{$c := .}}{{$r := index $u.StreamRTSP $c}}
+<tr><td class="mono">{{$c}}</td><td class="mono">{{$u.RTSPHost}}:{{$u.RTSPPort}}</td>
+<td class="mono">{{if index $r "main"}}{{$p.RTSPPath $c "main"}}{{else}}&mdash;{{end}}</td>
+<td class="mono">{{if index $r "sub"}}{{$p.RTSPPath $c "sub"}}{{else}}&mdash;{{end}}</td></tr>
+{{end}}
+</table>
+{{else}}{{template "nvr-rtsp-off"}}{{end}}
+</section>
+</div>
+
+<div class="nvr-pane" data-pane="ha" hidden>
+<section>
+<div class="sec-head"><h2>Home Assistant</h2></div>
+{{if $u.RTSPPort}}
+<p class="hint">Settings &rsaquo; Devices &rsaquo; Add integration &rsaquo; Generic Camera, Stream source:</p>
+{{range $u.Cameras}}{{$c := .}}{{with index $u.StreamRTSP $c "sub"}}<button type="button" class="live-url" data-copy="{{.}}"><span class="live-url-label">{{$c}}</span><code>{{.}}</code><span class="live-url-done">copy</span></button>{{else}}{{with index $u.StreamRTSP $c "main"}}<button type="button" class="live-url" data-copy="{{.}}"><span class="live-url-label">{{$c}}</span><code>{{.}}</code><span class="live-url-done">copy</span></button>{{end}}{{end}}{{end}}
+{{else}}{{template "nvr-rtsp-off"}}{{end}}
+</section>
+</div>
+
+<div class="nvr-pane" data-pane="other" hidden>
+<section>
+<div class="sec-head"><h2>RTSP</h2></div>
+{{if $u.RTSP}}{{range $u.RTSP}}<button type="button" class="live-url" data-copy="{{.}}"><code>{{.}}</code><span class="live-url-done">copy</span></button>{{end}}
+{{else}}{{template "nvr-rtsp-off"}}{{end}}
+</section>
+<section>
+<div class="sec-head"><h2>HTTP</h2></div>
+<p class="hint">VLC, mpv, ffmpeg.</p>
+{{range $u.HTTP}}<button type="button" class="live-url" data-copy="{{.}}"><code>{{.}}</code><span class="live-url-done">copy</span></button>{{end}}
+</section>
+</div>
+{{template "appsettings-close"}}
+<script>
+(function () {
+  var first = {{if .Merged}}'frigate'{{else}}{{.Tab}}{{end}};
+  try { if (!{{if .Pasted}}true{{else}}false{{end}}) first = localStorage.getItem('reostream.nvrTab') || first; } catch (e) {}
+  function show(t) {
+    document.querySelectorAll('.nvr-pane').forEach(function (p) { p.hidden = p.dataset.pane !== t; });
+    document.querySelectorAll('.nvr-tabs button').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.tab === t ? 'true' : 'false'); });
+    try { localStorage.setItem('reostream.nvrTab', t); } catch (e) {}
+  }
+  document.querySelectorAll('.nvr-tabs button').forEach(function (b) { b.addEventListener('click', function () { show(b.dataset.tab); }); });
+  show(first);
+  function copy(text, done) {
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); return; }
+    var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta); done(ok);
+  }
+  function flag(el, ok, back) { el.textContent = ok ? 'copied' : 'copy failed'; setTimeout(function () { el.textContent = back; }, 1400); }
+  document.querySelectorAll('.live-url').forEach(function (b) {
+    b.addEventListener('click', function () { copy(b.dataset.copy, function (ok) { flag(b.querySelector('.live-url-done'), ok, 'copy'); }); });
+  });
+  document.querySelectorAll('.copy-block').forEach(function (b) {
+    b.addEventListener('click', function () { copy(document.getElementById(b.dataset.target).textContent, function (ok) { flag(b, ok, 'Copy'); }); });
+  });
+})();
+</script>
+{{end}}
+
+{{define "nvr-rtsp-off"}}<p class="hint">RTSP is off. Turn it on with <code>[rtsp]</code> in the <a href="/config">config file</a>.</p>{{end}}
