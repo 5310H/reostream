@@ -1,7 +1,7 @@
 # Measurements
 
-These are measurements taken on the author's own cameras. Anyone reproducing them should
-expect their own numbers to differ by camera model and firmware.
+I measured these on my own cameras. Your numbers will differ with camera model and
+firmware.
 
 ## RTSP vs Baichuan, Duo 3 PoE
 

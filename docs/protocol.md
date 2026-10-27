@@ -176,9 +176,8 @@ the two that work.
 dispatch table in the NVR's camera-facing client, which lists 183 ids by name; the
 HomeHub Pro's client lists 240. See `docs/control.md`.
 
-This section previously asserted that the heartbeat was message 5, and it is worth
-keeping the correction rather than quietly editing the number, because the wrong answer
-was reached carefully and still held for days.
+I first had the heartbeat as message 5. I'm keeping the correction here instead of
+quietly changing the number, because I got it wrong carefully and it held for days.
 
 The reasoning was: `bc_module::heartbeat` in `libbase.so` sets up its send with an id in
 r2, and its failure path calls `rpc_msg_name(5)` to name the message it could not send.
