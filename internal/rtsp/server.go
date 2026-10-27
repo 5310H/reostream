@@ -145,7 +145,7 @@ type dropCount struct {
 func (s *Server) Add(path string) *Stream {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := &Stream{srv: s.srv}
+	st := &Stream{srv: s.srv, epoch90: wallEpoch90(time.Now())}
 	s.streams[path] = st
 	return st
 }

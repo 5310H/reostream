@@ -74,6 +74,17 @@ type videoEncoder interface {
 // parameter sets inline in the elementary stream rather than out of band, and
 // they belong in the SDP. Everything below stays nil until then.
 type Stream struct {
+	// epoch90 is added to every RTP timestamp: the wall clock in 90 kHz
+	// ticks when this stream was made. Each run of the daemon starts its
+	// timeline from zero, so without it a restart sent timestamps back to
+	// where the last run began. go2rtc keeps a recorder (Frigate's)
+	// attached across that restart and passes the jump straight on, and
+	// ffmpeg cannot write time that runs backwards: it piled minutes of
+	// video into one segment and wrote nothing new until the clock caught
+	// up, or until Frigate's watchdog restarted it. From the wall clock, a
+	// restart is a short gap forward instead.
+	epoch90 uint64
+
 	mu      sync.Mutex
 	ready   bool
 	readers int // attached readers, gating packetisation
@@ -394,7 +405,7 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 		return
 	}
 	for _, p := range pkts {
-		p.Timestamp = uint32(ts90)
+		p.Timestamp = uint32(ts90 + s.epoch90)
 		// A write error is a reader problem, not a camera problem. gortsplib
 		// drops the reader; the camera goroutine carries on.
 		_ = ss.WritePacketRTP(media, p)
@@ -507,7 +518,7 @@ func (s *Stream) audioRTPTime(f baichuan.Frame) uint32 {
 		return 0
 	}
 	pts90 := clock.PTS(lastVideo, f.Data)
-	return uint32(pts90 * uint64(cfg.SampleRate) / rtpClockHz)
+	return uint32((pts90 + s.epoch90) * uint64(cfg.SampleRate) / rtpClockHz)
 }
 
 // initialise builds the description from the parameter sets carried in a
@@ -706,3 +717,8 @@ var errNoParameterSets = errors.New("rtsp: keyframe carries no parameter sets")
 
 // errUnsupportedCodec means the camera sent something neither H264 nor H265.
 var errUnsupportedCodec = errors.New("rtsp: unsupported video codec")
+
+// wallEpoch90 is t in 90 kHz ticks since the Unix epoch.
+func wallEpoch90(t time.Time) uint64 {
+	return uint64(t.Unix())*rtpClockHz + uint64(t.Nanosecond())*rtpClockHz/1_000_000_000
+}

@@ -35,7 +35,39 @@ var (
 	wakeIdleTimeout = 4 * time.Second
 	// wakePoll is how often demand is checked.
 	wakePoll = 500 * time.Millisecond
+	// motionHold is how long one report of motion keeps the camera awake
+	// when no end of it arrives. reoevent sends its end 20 s after the
+	// last motion, so this only matters if that message is lost.
+	motionHold = 2 * time.Minute
 )
+
+// Motion tells a battery camera's main stream that the camera reports
+// motion (on) or that the motion is over (off). While it lasts the stream
+// wakes with nobody watching, so the presence stream, and whatever records
+// it, carries the event live instead of the last still; wakeMax still caps
+// the session. It reports whether camera is a battery camera with a main
+// stream; a wired camera is never asleep, so it has nothing to do there.
+func (s *Supervisor) Motion(camera string, on bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.onDemand && e.cfg.Name == camera && e.cfg.Stream == "main" {
+			until := time.Now()
+			if on {
+				until = until.Add(motionHold)
+			}
+			e.motionUntil.Store(until.UnixNano())
+			return true
+		}
+	}
+	return false
+}
+
+// wanted is whether an on-demand stream should be awake: it is always on,
+// someone is watching, or the camera reports motion.
+func wanted(e *entry) bool {
+	return e.alwaysOn || e.h.Clients() > 0 || time.Now().UnixNano() < e.motionUntil.Load()
+}
 
 // runOnDemand owns a battery camera's stream: asleep until a viewer
 // subscribes, awake while one is, asleep again soon after the last leaves
@@ -46,8 +78,8 @@ func (s *Supervisor) runOnDemand(ctx context.Context, e *entry) {
 	tick := time.NewTicker(wakePoll)
 	defer tick.Stop()
 	for {
-		// Asleep: wait for a viewer.
-		for e.h.Clients() == 0 {
+		// Asleep: wait for a viewer or motion.
+		for !wanted(e) {
 			select {
 			case <-ctx.Done():
 				return
@@ -56,7 +88,7 @@ func (s *Supervisor) runOnDemand(ctx context.Context, e *entry) {
 		}
 
 		fails := 0
-		for fails < wakeTries && e.h.Clients() > 0 {
+		for fails < wakeTries && wanted(e) {
 			reason, err := s.wakeSession(ctx, e)
 			if ctx.Err() != nil {
 				return
@@ -108,13 +140,13 @@ func (s *Supervisor) wakeSession(ctx context.Context, e *entry) (string, error) 
 				return
 			case <-tick.C:
 			}
-			if e.h.Clients() > 0 {
+			if wanted(e) {
 				lastSeen = time.Now()
 			}
 			switch {
 			case time.Since(lastSeen) >= wakeIdle:
-				reason <- "no one watching"
-			case time.Since(start) >= wakeMax:
+				reason <- "no one watching, no motion"
+			case !e.alwaysOn && time.Since(start) >= wakeMax:
 				reason <- "session limit"
 			default:
 				continue
@@ -124,7 +156,14 @@ func (s *Supervisor) wakeSession(ctx context.Context, e *entry) (string, error) 
 		}
 	}()
 
-	log.Printf("reostream: %s: waking for a viewer", hubName(e.cfg.Name, e.cfg.Stream))
+	why := "a viewer"
+	switch {
+	case e.alwaysOn:
+		why = "always on"
+	case e.h.Clients() == 0:
+		why = "motion"
+	}
+	log.Printf("reostream: %s: waking for %s", hubName(e.cfg.Name, e.cfg.Stream), why)
 	s.setRunning(e, true)
 	cfg := e.cfg
 	cfg.IdleTimeout = wakeIdleTimeout

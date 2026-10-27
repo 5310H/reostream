@@ -84,3 +84,37 @@ func TestGetConfigWritesOneSection(t *testing.T) {
 		t.Fatalf("no message %d reached the camera", id)
 	}
 }
+
+// A read that needs more than a channel (the per-type AI settings, 342,
+// which take <type>people</type>) goes out like a write: the channel in an
+// extension, the request document in a second section. This is how the
+// Reolink app sends it (captured 2026-10-26).
+func TestGetConfigWithBodyWritesTwoSections(t *testing.T) {
+	cam := fakecam.New(t, loadFixture(t, "h265_s2c.bin"))
+	conn, err := Dial(context.Background(), cam.Addr(), Options{Password: ""})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	const id = 342
+	if err := conn.GetConfigWith(id, []byte("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AiDetectCfg/>\n</body>\n")); err != nil {
+		t.Fatalf("GetConfigWith: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	var found bool
+	walkMessages(cam.Received(), func(h Header, _ []byte) bool {
+		if h.MsgID != id {
+			return true
+		}
+		found = true
+		if h.PayloadOff == 0 || h.MsgLen <= h.PayloadOff {
+			t.Errorf("MsgLen %d PayloadOff %d: a read with a request body must carry two sections", h.MsgLen, h.PayloadOff)
+		}
+		return false
+	})
+	if !found {
+		t.Fatalf("no message %d reached the camera", id)
+	}
+}

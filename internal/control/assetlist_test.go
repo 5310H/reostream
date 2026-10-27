@@ -43,6 +43,18 @@ func TestOnlyTheListedAssetsAreEmbedded(t *testing.T) {
 		"assets/mpegts.js",
 		"assets/mpegts.js.LICENSE.txt",
 		"assets/rec.js",
+		// The weekly schedule grid; no camera data in it, the tables
+		// come with the authenticated page.
+		"assets/schedule.js",
+		// The detection zone painter; the zone itself comes with the page.
+		"assets/zone.js",
+		// The privacy mask box drawer; the boxes come with the page.
+		"assets/mask.js",
+		// The smart rule point editor; the rules come with the page.
+		"assets/rules.js",
+		// The siren sound uploader: decodes a file in the browser and posts
+		// the samples to the authenticated sound endpoint.
+		"assets/sound.js",
 		"assets/settings.js",
 		"assets/snapshot.js",
 		"assets/style.css",

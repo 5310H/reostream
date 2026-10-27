@@ -78,6 +78,8 @@ func stateLabel(state string) string {
 	switch state {
 	case "streaming":
 		return "healthy"
+	case "privacy":
+		return "privacy mode"
 	case "":
 		return "unknown"
 	}

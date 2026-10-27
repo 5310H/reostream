@@ -350,3 +350,40 @@ func TestCameraListOffersOnlyStreamsTheCameraHas(t *testing.T) {
 		t.Errorf("zoom offered on a camera that does not serve it: %v", got)
 	}
 }
+
+// The form has no fields for these, so an edit must keep them: saving a
+// battery camera used to drop its motion_topic.
+func TestFormEditKeepsMotionTopicHoldPictureAndAlwaysOn(t *testing.T) {
+	cfg := &config.Config{
+		Events: &config.EventsConfig{MQTT: "127.0.0.1:1883"},
+		Cameras: []config.Camera{
+			{Name: "porch", Address: "1.1.1.1", UID: "95270000TESTUID1", Password: "x",
+				MotionTopic: "reostream/argus/motion", HoldPicture: true, AlwaysOn: true},
+		},
+	}
+	form := url.Values{"name": {"porch"}, "address": {"1.1.1.1"}, "uid": {"95270000TESTUID1"}, "password": {passwordUnchanged}}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatal(err)
+	}
+	block := cameraBlockText(cfg.Cameras[0])
+	for _, want := range []string{"motion_topic = \"reostream/argus/motion\"\n", "hold_picture = true\n", "always_on = true\n"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("block lost %q:\n%s", want, block)
+		}
+	}
+}
+
+// The page's camera form has no uid field and a battery camera ticks no
+// streams, so saving one used to fail with "pick at least one stream".
+func TestFormEditOfABatteryCameraKeepsItsUID(t *testing.T) {
+	cfg := &config.Config{Cameras: []config.Camera{
+		{Name: "porch", Address: "1.1.1.1", UID: "95270000TESTUID1", Password: "x"},
+	}}
+	form := url.Values{"name": {"porch"}, "address": {"1.1.1.1"}, "username": {"admin"}, "password": {passwordUnchanged}}
+	if err := applyCameraForm(cfg, form); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cameras[0].UID != "95270000TESTUID1" {
+		t.Fatalf("uid became %q", cfg.Cameras[0].UID)
+	}
+}

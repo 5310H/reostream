@@ -277,7 +277,7 @@ func TestCameraLiveTabShowsStreamsAndActions(t *testing.T) {
 func TestCameraSettingsSectionsReadOnlyTheirOwnBlock(t *testing.T) {
 	key := baichuan.AESKey(testProbeNonce, "")
 	osdXML := testXMLHeader + `<body><OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>1</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName><OsdDatetime><channelId>0</channelId><enable>1</enable><topLeftX>1</topLeftX><topLeftY>1</topLeftY></OsdDatetime></body>`
-	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation></VideoInput><InputAdvanceCfg><channelId>0</channelId><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight><mirror>0</mirror><flip>0</flip></InputAdvanceCfg></body>`
+	ispXML := testXMLHeader + `<body><VideoInput><channelId>0</channelId><bright>120</bright><contrast>110</contrast><saturation>100</saturation><sharpen>128</sharpen></VideoInput><InputAdvanceCfg><channelId>0</channelId><PowerLineFrequency><mode>60hz</mode><enable>1</enable></PowerLineFrequency><DayNight><mode>auto</mode><IrcutMode>ir</IrcutMode><Threshold>medium</Threshold></DayNight><mirror>0</mirror><flip>0</flip></InputAdvanceCfg></body>`
 	ledXML := testXMLHeader + `<body><LedState><channelId>0</channelId><state>auto</state><lightState>open</lightState></LedState></body>`
 
 	for _, tc := range []struct {

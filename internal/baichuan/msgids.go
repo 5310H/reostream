@@ -92,6 +92,7 @@ const (
 	MsgIDPtzPreset2                  = 190 // ptz preset
 	MsgIDGetAutoUpdate               = 195 // get auto update
 	MsgIDSetAutoUpdate               = 196 // set auto update
+	MsgIDWifiSignal                  = 115 // wifi signal
 	MsgIDWifiSignalScan              = 198 // wifi signal scan
 	MsgIDGetSupport                  = 199 // get support
 	MsgIDWifiTest                    = 200 // wifi test
@@ -317,6 +318,8 @@ var msgNames = map[uint32]string{
 	80:  "version info",
 	81:  "rec task get",
 	82:  "rec task set",
+	97:  "get upnp", // Upnp enable (write proved 2026-10-26)
+	98:  "set upnp",
 	99:  "restore",
 	100: "auto reboot set",
 	102: "sdcard get",
@@ -349,6 +352,8 @@ var msgNames = map[uint32]string{
 	202: "talk fdx stream",
 	208: "led get",
 	209: "led set",
+	210: "get ptop", // PTOP enable: Reolink P2P (UID) access (write proved 2026-10-26)
+	211: "set ptop",
 	212: "rf cfg get",
 	213: "rf cfg set",
 	216: "email task set",
@@ -398,6 +403,7 @@ var msgNames = map[uint32]string{
 	342: "ai detect cfg get",
 	343: "ai detect cfg set",
 	344: "ai default detect cfg get",
+	345: "alarm area set", // AlarmArea person/vehicle/dogCat grids, the app's non-detection zone (captured 2026-10-26)
 	347: "get audio file info list",
 	348: "delete auto file",
 	349: "play audio file",
@@ -407,6 +413,8 @@ var msgNames = map[uint32]string{
 	359: "bino adjust",
 	360: "adjust result get",
 	361: "linewidth get",
+	363: "push cfg get", // PushCfg interval, rich notifications (captured 2026-10-26)
+	364: "push cfg set",
 	365: "zf backlash get",
 	366: "zf backlash set",
 	368: "set audio file info list",

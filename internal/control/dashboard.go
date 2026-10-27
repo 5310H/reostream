@@ -176,7 +176,9 @@ func streamRank(name string) int {
 }
 
 // stateRank orders stream states worst first for cameraState.
-var stateRank = map[string]int{"down": 4, "reconnecting": 3, "novideo": 2, "streaming": 1, "asleep": 0}
+// A camera in privacy mode is off on purpose: worse than streaming, never
+// as bad as failing.
+var stateRank = map[string]int{"down": 5, "reconnecting": 4, "novideo": 3, "privacy": 2, "streaming": 1, "asleep": 0}
 
 // cameraState is the worst state among a camera's streams, or "idle" for
 // a camera with none reported.
@@ -280,7 +282,7 @@ func healthyCount(cards []statusCard) int {
 	n := 0
 	for _, c := range cards {
 		// Asleep is a battery camera doing what it should.
-		if c.State == "streaming" || c.State == "asleep" {
+		if c.State == "streaming" || c.State == "asleep" || c.State == "privacy" {
 			n++
 		}
 	}

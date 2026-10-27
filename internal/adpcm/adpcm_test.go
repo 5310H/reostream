@@ -90,3 +90,31 @@ func TestShortBlockIsPaddedNotTruncated(t *testing.T) {
 		t.Errorf("short input gave %d bytes, want a full %d byte block", len(got), BlockBytes)
 	}
 }
+
+// A custom siren sound is one continuous stream of codes, high nibble first,
+// no block preambles: the Reolink app's own upload of 3 s of a quiet room
+// decoded that way centres on zero, and the other way drifts (2026-10-26).
+func TestEncodeStreamIsHighNibbleFirstAndRoundTrips(t *testing.T) {
+	pcm := make([]int16, 1600)
+	for i := range pcm {
+		// A 500 Hz tone at 16 kHz.
+		pcm[i] = int16(8000 * math.Sin(2*math.Pi*500*float64(i)/16000))
+	}
+	b := EncodeStream(pcm)
+	if len(b) != len(pcm)/2 {
+		t.Fatalf("len = %d, want %d", len(b), len(pcm)/2)
+	}
+	got := DecodeStream(b)
+	var err float64
+	for i := 200; i < len(pcm); i++ {
+		err += math.Abs(float64(got[i]) - float64(pcm[i]))
+	}
+	if avg := err / float64(len(pcm)-200); avg > 400 {
+		t.Errorf("mean error %v after round trip", avg)
+	}
+	// High nibble first: the first sample's code is in b[0]>>4.
+	var e Encoder
+	if first := e.encodeSample(pcm[0]); b[0]>>4 != first {
+		t.Errorf("first code %x is not in the high nibble of %02x", first, b[0])
+	}
+}

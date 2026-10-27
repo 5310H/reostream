@@ -1,8 +1,9 @@
-// Package mqtt is a minimal MQTT 3.1.1 publish-only client: enough to feed
-// motion and status into mosquitto / Home Assistant / Frigate without pulling
-// in a full client library. It publishes QoS 0 or QoS 1, reconnects on the
-// next Publish after any error, and uses keep-alive 0 so an idle connection is
-// never dropped by the broker (there is no subscribe path to service pings).
+// Package mqtt is a minimal MQTT 3.1.1 client: enough to feed motion and
+// status into mosquitto / Home Assistant / Frigate, and to hear another
+// tool's motion (Subscribe), without pulling in a full client library. A
+// Client publishes QoS 0 or QoS 1, reconnects on the next Publish after any
+// error, and uses keep-alive 0 so an idle connection is never dropped by the
+// broker; Subscribe keeps its own connection alive with pings.
 package mqtt
 
 import (
@@ -166,6 +167,12 @@ func (c *Client) readPuback(id uint16) error {
 // --- wire encoding (MQTT 3.1.1) ---
 
 func encodeConnect(clientID, user, pass string) []byte {
+	return encodeConnectKeepAlive(clientID, user, pass, 0)
+}
+
+// encodeConnectKeepAlive is CONNECT with a keep-alive, which a client that
+// pings (Subscribe) can ask for; 0 disables it.
+func encodeConnectKeepAlive(clientID, user, pass string, keepAlive time.Duration) []byte {
 	var vh []byte
 	vh = append(vh, encodeString("MQTT")...)
 	vh = append(vh, 0x04) // protocol level 4 (3.1.1)
@@ -177,7 +184,8 @@ func encodeConnect(clientID, user, pass string) []byte {
 		flags |= 0x40
 	}
 	vh = append(vh, flags)
-	vh = append(vh, 0x00, 0x00) // keep-alive 0 (disabled)
+	ka := uint16(keepAlive / time.Second)
+	vh = append(vh, byte(ka>>8), byte(ka))
 
 	payload := encodeString(clientID)
 	if user != "" {

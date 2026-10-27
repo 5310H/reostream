@@ -75,7 +75,19 @@ type StreamStat struct {
 	// OnDemand marks a battery camera's stream, which is asleep rather
 	// than down when it is not running.
 	OnDemand bool
+	// Privacy marks a stream whose camera is in privacy mode
+	// (stream.ErrPrivacy): off on purpose, not failing.
+	Privacy bool
+	// started is when the current run began, so Privacy can clear once a
+	// run has lasted long enough to be streaming.
+	started time.Time
 }
+
+// privacyRetry is how often a camera in privacy mode is checked again. It
+// is steady, not the error backoff: privacy mode is a choice, and the
+// stream should come back soon after it is turned off without the camera
+// being asked every second while it is on.
+var privacyRetry = 15 * time.Second
 
 // entry is everything one goroutine in runStream needs for the one stream
 // it owns for its entire life.
@@ -90,6 +102,14 @@ type entry struct {
 	// onDemand is a battery camera's stream: run only while someone is
 	// watching, never held open. See runOnDemand.
 	onDemand bool
+	// alwaysOn keeps an on-demand stream awake around the clock: a battery
+	// camera on constant power (config always_on).
+	alwaysOn bool
+	// privacyKick ends a privacy-mode wait early (PrivacyOff).
+	privacyKick chan struct{}
+	// motionUntil (Unix nanoseconds) keeps an on-demand stream awake with
+	// nobody watching while the camera reports motion. See Motion.
+	motionUntil atomic.Int64
 
 	// cancel stops just this stream, and done closes once its goroutine has
 	// fully returned. Both exist so one stream can be replaced without
@@ -196,7 +216,8 @@ func newEntry(cam config.Camera, st string) *entry {
 	h := hub.New(64)
 	h.SetOnDemand(onDemand)
 	return &entry{
-		rtsp: cam.RTSP,
+		privacyKick: make(chan struct{}, 1),
+		rtsp:        cam.RTSP,
 		cfg: stream.Config{
 			Name:     cam.Name,
 			Address:  cam.Address,
@@ -211,6 +232,7 @@ func newEntry(cam config.Camera, st string) *entry {
 		h:        h,
 		stat:     StreamStat{Camera: cam.Name, Stream: st, OnDemand: onDemand},
 		onDemand: onDemand,
+		alwaysOn: onDemand && cam.AlwaysOn,
 	}
 }
 
@@ -383,6 +405,16 @@ func (s *Supervisor) Validate(cams []config.Camera) error {
 		// section, and by this point the RTSP server exists.
 		cfg.RTSP = &config.RTSPConfig{}
 	}
+	// Likewise motion_topic needs an [events] broker, which this camera
+	// list does not carry: the whole file's own validation has checked
+	// that already. Without this every save from the page failed on a
+	// config that uses motion_topic.
+	for _, c := range cams {
+		if c.MotionTopic != "" {
+			cfg.Events = &config.EventsConfig{MQTT: "checked with the file"}
+			break
+		}
+	}
 	return cfg.Validate()
 }
 
@@ -520,6 +552,7 @@ func (s *Supervisor) Reload(cams []config.Camera) (ReloadResult, error) {
 func sameStream(e *entry, cam config.Camera) bool {
 	_, onDemand := cameraStreams(cam)
 	return e.onDemand == onDemand &&
+		e.alwaysOn == (onDemand && cam.AlwaysOn) &&
 		e.cfg.Address == cam.Address &&
 		e.cfg.Channel == cam.Channel &&
 		e.cfg.UID == cam.UID &&
@@ -638,9 +671,37 @@ func (s *Supervisor) runStream(ctx context.Context, e *entry) {
 
 		s.setRunning(e, true)
 		start := time.Now()
+		s.mu.Lock()
+		e.stat.started = start
+		s.mu.Unlock()
 		err := s.run(ctx, e.cfg, e.h)
 		ran := time.Since(start)
 		s.setResult(e, err)
+
+		if errors.Is(err, stream.ErrPrivacy) && ctx.Err() == nil {
+			s.mu.Lock()
+			was := e.stat.Privacy
+			e.stat.Privacy = true
+			s.mu.Unlock()
+			if !was {
+				log.Printf("reostream: %s: the camera is in privacy mode; checking again every %s", hubName(e.cfg.Name, e.cfg.Stream), privacyRetry)
+			}
+			backoff = s.backoffStart
+			select {
+			case <-ctx.Done():
+				e.h.Close()
+				return
+			case <-time.After(privacyRetry):
+			case <-e.kick():
+			}
+			continue
+		}
+		s.mu.Lock()
+		if e.stat.Privacy {
+			e.stat.Privacy = false
+			log.Printf("reostream: %s: privacy mode is off", hubName(e.cfg.Name, e.cfg.Stream))
+		}
+		s.mu.Unlock()
 
 		if ctx.Err() != nil {
 			// The stream is going away for good: release anyone subscribed
@@ -689,6 +750,12 @@ func (s *Supervisor) Stats() []StreamStat {
 	defer s.mu.Unlock()
 	out := make([]StreamStat, 0, len(s.entries))
 	for _, e := range s.entries {
+		// A run that has lasted half a privacy check is streaming: the
+		// camera left privacy mode.
+		if e.stat.Privacy && e.stat.Running && time.Since(e.stat.started) >= privacyRetry/2 {
+			e.stat.Privacy = false
+			log.Printf("reostream: %s: privacy mode is off", hubName(e.cfg.Name, e.cfg.Stream))
+		}
 		out = append(out, e.stat)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -722,4 +789,22 @@ func (s *Supervisor) incrementRestarts(e *entry) {
 	s.mu.Lock()
 	e.stat.Restarts++
 	s.mu.Unlock()
+}
+
+// kick is the entry's privacy-wait channel.
+func (e *entry) kick() chan struct{} { return e.privacyKick }
+
+// PrivacyOff tells camera's streams that privacy mode was just turned off,
+// so they try again now rather than at the next check.
+func (s *Supervisor) PrivacyOff(camera string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.entries {
+		if e.cfg.Name == camera && e.stat.Privacy {
+			select {
+			case e.kick() <- struct{}{}:
+			default:
+			}
+		}
+	}
 }

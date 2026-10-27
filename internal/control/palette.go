@@ -39,14 +39,18 @@ func paletteIndex(configPath string) template.JS {
 	}
 	for _, cam := range cams {
 		out = append(out, paletteEntry{"Live", cam.Name, "/cameras/" + cam.Name})
+		// Only the sections this camera has: a field in a section it
+		// lacks (tracking on a camera with no PTZ) led to a 404.
+		has := map[string]bool{}
 		for _, g := range settingsCats(cachedSupport(cam)) {
 			for _, it := range g.items {
+				has[it[0]] = true
 				out = append(out, paletteEntry{it[1], cam.Name + " · " + g.group, catHref(cam.Name, it[0])})
 			}
 		}
 		for _, g := range groups() {
 			cat := catOf[g.Title]
-			if cat == "" {
+			if cat == "" || !has[cat] {
 				continue
 			}
 			for _, f := range g.Fields {

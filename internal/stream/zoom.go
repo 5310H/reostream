@@ -33,7 +33,7 @@ func baichuanZoomInfo(ctx context.Context, address, username, password string) (
 	if di, err := baichuan.ParseDeviceInfo(conn.DeviceInfo()); err != nil || di.DeviceInfo.ChannelNum < 2 {
 		return "", 0, 0, fmt.Errorf("zoom: the camera reports one channel")
 	}
-	if err := startZoom(conn); err != nil {
+	if err := startZoom(conn, "zoom"); err != nil {
 		return "", 0, 0, err
 	}
 	d := baichuan.NewDepacketiser()

@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -42,6 +43,67 @@ type eventRelay struct {
 	handle  func(alarms.Change)
 	watched map[string]bool
 	clips   map[string]*time.Timer
+
+	// wake hears motion reported on a camera's motion_topic, to keep a
+	// battery camera awake for it; reported is the last state heard per
+	// camera. See motionReported.
+	wake     func(camera string, on bool)
+	reported map[string]bool
+}
+
+// motionReported takes one message from a camera's motion_topic: "ON" or
+// "OFF" (any case). Only a change is relayed and passed to wake, so the
+// same state again, including the relay's own retained message when the
+// topic is the one it publishes to, does nothing.
+func (r *eventRelay) motionReported(camera string, payload []byte) {
+	var on bool
+	switch strings.ToUpper(strings.TrimSpace(string(payload))) {
+	case "ON":
+		on = true
+	case "OFF":
+	default:
+		return
+	}
+	r.mu.Lock()
+	h, wake := r.handle, r.wake
+	was, seen := r.reported[camera]
+	if h == nil || (seen && was == on) {
+		r.mu.Unlock()
+		return
+	}
+	if r.reported == nil {
+		r.reported = map[string]bool{}
+	}
+	r.reported[camera] = on
+	r.mu.Unlock()
+	if wake != nil {
+		wake(camera, on)
+	}
+	h(alarms.Change{Camera: camera, Kind: "motion", On: on, Time: time.Now()})
+}
+
+// motionTopics maps each motion_topic in cams to its camera.
+func motionTopics(cams []config.Camera) map[string]string {
+	out := map[string]string{}
+	for _, c := range cams {
+		if c.MotionTopic != "" {
+			out[c.MotionTopic] = c.Name
+		}
+	}
+	return out
+}
+
+// motionClientID is the motion subscriber's MQTT client id.
+func motionClientID() string {
+	var b [4]byte
+	rand.Read(b[:])
+	return fmt.Sprintf("reostream-motion-%x", b)
+}
+
+// motionWaker is the part of the supervisor that wakes a battery camera
+// for motion (supervisor.Supervisor.Motion).
+type motionWaker interface {
+	Motion(camera string, on bool) bool
 }
 
 // clipMotionHold is how long motion stays on after a camera's last
@@ -128,10 +190,12 @@ func (s *Server) syncRelay() {
 			names = append(names, c.Name)
 		}
 	}
+	topics := motionTopics(cfg.Cameras)
 	key := ""
 	if ev.MQTT != "" || ev.Frigate != "" {
 		b, _ := json.Marshal(ev)
-		key = string(b) + "|" + strings.Join(names, ",")
+		t, _ := json.Marshal(topics)
+		key = string(b) + "|" + strings.Join(names, ",") + "|" + string(t)
 	}
 	relay.mu.Lock()
 	defer relay.mu.Unlock()
@@ -185,6 +249,30 @@ func (s *Server) syncRelay() {
 		relay.remember(e)
 	}
 	relay.handle = handle
+	relay.reported = nil
+	relay.wake = nil
+	if w, ok := s.opts.Supervisor.(motionWaker); ok {
+		relay.wake = func(camera string, on bool) { w.Motion(camera, on) }
+	}
+	if ev.MQTT != "" && len(topics) > 0 {
+		list := make([]string, 0, len(topics))
+		for t := range topics {
+			list = append(list, t)
+		}
+		go mqtt.Subscribe(ctx, mqtt.SubscribeOptions{
+			// Unique per process: the broker drops the older of two
+			// connections sharing a client id, so two reostreams (or a
+			// test instance beside the real one) would knock each other
+			// off every few seconds.
+			Addr: ev.MQTT, ClientID: motionClientID(), User: ev.MQTTUser, Pass: ev.MQTTPassword,
+			OnError: func(err error) { log.Printf("control: motion topics: %v", err) },
+		}, list, func(topic string, payload []byte) {
+			if cam, ok := topics[topic]; ok {
+				relay.motionReported(cam, payload)
+			}
+		})
+		log.Printf("control: listening for motion on %d topics", len(list))
+	}
 	relay.watched = map[string]bool{}
 	for _, name := range names {
 		relay.watched[name] = true

@@ -181,8 +181,9 @@ On by default at port 8561 (not 8554, which go2rtc uses). A camera's `rtsp` list
 which of its streams are served; cameras added from the page serve all of them. Remove
 the `[rtsp]` section to turn it off.
 
-Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`, plus `<cam>_zoom` for a
-TrackMix's zoom lens. TCP interleaved is the default; UDP is offered, but a lost packet is
+Serves `rtsp://host:8561/<cam>`, `<cam>_sub` and `<cam>_extern`, plus `<cam>_zoom` and
+`<cam>_zoom_sub` for a TrackMix's zoom lens (add `"zoom_sub"` to the camera's `streams`
+for the lighter one, 896x512, e.g. for Frigate's detect role). TCP interleaved is the default; UDP is offered, but a lost packet is
 a corrupt frame.
 
 ### Holding the last picture
@@ -322,4 +323,42 @@ cameras:
       continuous:
         days: 7
 ```
+
+#### Waking for motion
+
+A battery camera reports its motion to Reolink's cloud, not to reostream. `reoevent`
+hears those reports on the router the camera talks through and publishes them to MQTT as
+`ON` / `OFF`. Give the camera that topic and reostream wakes it for the length of the
+motion, so the presence stream (and Frigate's recording of it) carries the event live
+instead of the last picture, then saves the new picture and lets it sleep. The motion is
+also relayed like a wired camera's alerts (`<prefix>/<camera>/motion`, and a Frigate
+event with `frigate_motion = true`). It needs the `[events]` broker:
+
+```toml
+[events]
+mqtt = "192.0.2.5:1883"
+
+[[camera]]
+name = "backyard"
+uid = "9527000N031XXXXX"
+motion_topic = "reostream/argus/motion"   # reoevent -name argus
+```
+
+Each motion costs one wake (a few seconds to the first frame, then until about 10 s after
+the motion ends, at most 5 minutes), on top of the camera's own recording.
+
+#### Always on (constant power only)
+
+A battery camera on constant power (a plug-in adapter, not solar) can stream around the
+clock like a wired camera. Add `always_on = true` to it: reostream keeps it awake with nobody
+watching and no 5-minute limit, so the presence stream is live all the time.
+
+```toml
+[[camera]]
+name = "backyard"
+uid = "9527000N031XXXXX"
+always_on = true
+```
+
+Off by default. On a battery, even with solar, it drains the camera in days.
 

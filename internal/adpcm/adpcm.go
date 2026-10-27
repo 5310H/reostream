@@ -164,3 +164,52 @@ func Decode(block []byte) []int16 {
 	}
 	return out
 }
+
+// EncodeStream encodes pcm as one continuous run of codes, two per byte, the
+// FIRST sample in the HIGH nibble, starting from silence, with no block
+// preambles. This is the custom siren sound format (import audio, 261): the
+// Reolink app's own upload decodes cleanly this way and drifts the other
+// way, the opposite nibble order to a talk block.
+func EncodeStream(pcm []int16) []byte {
+	var e Encoder
+	out := make([]byte, (len(pcm)+1)/2)
+	for i, s := range pcm {
+		code := e.encodeSample(s)
+		if i%2 == 0 {
+			out[i/2] = code << 4
+		} else {
+			out[i/2] |= code
+		}
+	}
+	return out
+}
+
+// DecodeStream is EncodeStream's inverse, for tests and checks.
+func DecodeStream(b []byte) []int16 {
+	var pred, idx int32
+	out := make([]int16, 0, len(b)*2)
+	for _, x := range b {
+		for _, code := range []byte{x >> 4, x & 15} {
+			step := stepTable[idx]
+			diff := step >> 3
+			if code&4 != 0 {
+				diff += step
+			}
+			if code&2 != 0 {
+				diff += step >> 1
+			}
+			if code&1 != 0 {
+				diff += step >> 2
+			}
+			if code&8 != 0 {
+				pred -= diff
+			} else {
+				pred += diff
+			}
+			pred = clamp(pred, -32768, 32767)
+			idx = clamp(idx+indexTable[code], 0, 88)
+			out = append(out, int16(pred))
+		}
+	}
+	return out
+}

@@ -27,6 +27,8 @@ func streamState(st server.StreamStatus) string {
 		return "novideo"
 	case st.OnDemand:
 		return "asleep"
+	case st.Privacy:
+		return "privacy"
 	case st.Restarts > 0:
 		return "reconnecting"
 	default:

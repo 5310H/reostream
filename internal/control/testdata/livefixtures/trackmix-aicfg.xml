@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<body>
+<AiCfg version="1.1">
+<channelId>0</channelId>
+<smartTrack>0</smartTrack>
+<smartTrackMode>2</smartTrackMode>
+<smartTrackModeAbility>14</smartTrackModeAbility>
+<detectType>people,vehicle,dog_cat</detectType>
+<smartTrackType>people</smartTrackType>
+<smartTrackPt>1</smartTrackPt>
+<smartTrackObjectStopDelay>20</smartTrackObjectStopDelay>
+<smartTrackObjectDisappearDelay>10</smartTrackObjectDisappearDelay>
+<trackPriorities>
+<item>people</item>
+<item>animal</item>
+<item>vehicle</item>
+</trackPriorities>
+<supportPriorList>
+<item>people</item>
+<item>vehicle</item>
+<item>animal</item>
+</supportPriorList>
+</AiCfg>
+</body>
+

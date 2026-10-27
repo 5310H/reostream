@@ -184,6 +184,22 @@ func TestFlatURLFormsResolveToHubKeys(t *testing.T) {
 	}
 }
 
+// The zoom lens's sub stream ends in "_sub" too; it must not be read as
+// the sub stream of a camera called "gate_zoom".
+func TestZoomSubResolvesToTheZoomLensSubStream(t *testing.T) {
+	sub, zoom, zoomSub := hub.New(1), hub.New(1), hub.New(1)
+	s := New(StaticHubs(map[string]*hub.Hub{
+		"gate/sub":      sub,
+		"gate/zoom":     zoom,
+		"gate/zoom_sub": zoomSub,
+	}))
+	for path, want := range map[string]*hub.Hub{"gate_sub": sub, "gate_zoom": zoom, "gate_zoom_sub": zoomSub} {
+		if got, ok := s.lookup(path); !ok || got != want {
+			t.Errorf("%s resolved to the wrong stream (found=%v)", path, ok)
+		}
+	}
+}
+
 // A camera whose name ends in one of the stream suffixes resolves to itself,
 // not to a suffix reading of its name.
 func TestARealCameraNameBeatsASuffixReading(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/alarms"
+	"github.com/VoltTech21/reostream/internal/config"
 )
 
 // A battery camera has no live alert connection; the files it uploads are
@@ -39,5 +40,49 @@ func TestNoClipMotionWhileTheRelayIsOff(t *testing.T) {
 	r.clipArrived("porch") // must not panic or start a timer
 	if len(r.clips) != 0 {
 		t.Fatal("a timer started with the relay off")
+	}
+}
+
+// Motion another tool reports for a camera (reoevent, on MQTT) goes out
+// once per change and wakes the camera; repeats of the same state, such as
+// the relay's own retained message coming back on a shared topic, do
+// nothing.
+func TestReportedMotionIsRelayedOncePerChangeAndWakes(t *testing.T) {
+	var mu sync.Mutex
+	var got []alarms.Change
+	var woke []bool
+	r := &eventRelay{
+		handle: func(c alarms.Change) { mu.Lock(); got = append(got, c); mu.Unlock() },
+		wake:   func(cam string, on bool) { mu.Lock(); woke = append(woke, on); mu.Unlock() },
+	}
+	for _, p := range []string{"ON", "ON", "OFF", "OFF", "garbage", "on"} {
+		r.motionReported("cam-10", []byte(p))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 3 || !got[0].On || got[1].On || !got[2].On || got[0].Camera != "cam-10" || got[0].Kind != "motion" {
+		t.Fatalf("relayed %+v, want ON, OFF, ON for cam-10", got)
+	}
+	if len(woke) != 3 || !woke[0] || woke[1] || !woke[2] {
+		t.Fatalf("wake calls %v, want on, off, on", woke)
+	}
+}
+
+func TestMotionTopicsMapToTheirCameras(t *testing.T) {
+	got := motionTopics([]config.Camera{
+		{Name: "cam-10", UID: "X", MotionTopic: "reostream/argus/motion"},
+		{Name: "gate"},
+	})
+	if len(got) != 1 || got["reostream/argus/motion"] != "cam-10" {
+		t.Fatalf("motionTopics = %v", got)
+	}
+}
+
+// Two reostreams on one broker must not share a client id, or the broker
+// keeps dropping one for the other (seen 2026-10-26: "motion topics: EOF"
+// every 10 s while a test instance ran beside the real one).
+func TestMotionClientIDsDiffer(t *testing.T) {
+	if a, b := motionClientID(), motionClientID(); a == b {
+		t.Fatalf("two subscribers got the same client id %q", a)
 	}
 }

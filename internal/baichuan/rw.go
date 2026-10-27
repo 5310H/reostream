@@ -26,6 +26,18 @@ func ReadConfig(ctx context.Context, conn *Conn, id uint32) ([]byte, int16, erro
 	return awaitReply(ctx, conn, id)
 }
 
+// ReadConfigWith is ReadConfig for a read that takes a request document
+// (see Conn.GetConfigWith). A nil req is a plain ReadConfig.
+func ReadConfigWith(ctx context.Context, conn *Conn, id uint32, req []byte) ([]byte, int16, error) {
+	if req == nil {
+		return ReadConfig(ctx, conn, id)
+	}
+	if err := conn.GetConfigWith(id, req); err != nil {
+		return nil, 0, err
+	}
+	return awaitReply(ctx, conn, id)
+}
+
 // WriteConfig sends body to id as a config write and reports the status the
 // camera answered.
 //

@@ -4,9 +4,11 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -161,7 +163,7 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	// are cumulative counters meant to survive a reconnect, not a rate.
 	defer h.MarkDisconnected()
 
-	zoom := cfg.Stream == "zoom"
+	zoom := isZoom(cfg.Stream)
 	if path, ok := nativePaths[cfg.Stream]; ok && (!zoom || zoomOverRTSP(cfg.Name)) {
 		return runNative(ctx, cfg, h, path)
 	}
@@ -218,7 +220,7 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	}
 
 	if zoom {
-		if err := startZoom(conn); err != nil {
+		if err := startZoom(conn, cfg.Stream); err != nil {
 			return fmt.Errorf("stream: %s: start video: %w", cfg.Name, err)
 		}
 	} else if err := conn.StartVideo(kind); err != nil {
@@ -247,6 +249,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	lastMedia := time.Now()
 
 	d := baichuan.NewDepacketiser()
+	// waitKey drops P frames after a lost video packet until a keyframe
+	// arrives (see Depacketiser.TakeGap).
+	waitKey := false
 	var mux *ts.Muxer
 	var reportedDroppedAudio int
 	lastPing := time.Now()
@@ -262,6 +267,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 				}
 				return fmt.Errorf("stream: %s: camera closed the connection", cfg.Name)
 			}
+			if privacyOn(msg) {
+				return fmt.Errorf("stream: %s: %w", cfg.Name, ErrPrivacy)
+			}
 			if zoom && msg.Header.MsgID == baichuan.MsgIDVideo && byte(msg.Header.EncOffset) != zoomChannel {
 				// The channel 0 sub stream that unlocks the zoom: wanted
 				// only for that, so its media goes nowhere.
@@ -269,10 +277,22 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 			}
 			if len(msg.Payload) > 0 {
 				d.Write(msg.Payload, msg.StartsPacket)
+				if d.TakeGap() && !waitKey {
+					waitKey = true
+					log.Printf("stream: %s: camera cut a video frame short; skipping to the next keyframe (%d lost so far)", cfg.Name, d.Lost())
+				}
 				for {
 					f, ok := d.Next()
 					if !ok {
 						break
+					}
+					if waitKey && f.Kind == baichuan.FramePFrame {
+						// Refers to the lost picture: a decoder shown it
+						// errors, and a hardware one can give up outright.
+						continue
+					}
+					if f.Kind == baichuan.FrameIFrame {
+						waitKey = false
 					}
 					switch f.Kind {
 					case baichuan.FrameIFrame, baichuan.FramePFrame:
@@ -435,12 +455,22 @@ func droppedEarlyAudio(kind baichuan.FrameKind) bool {
 // alone, channel 1 answers with a stream info frame and audio and nothing
 // else), so a zoom stream opens channel 0's sub stream first, the cheapest
 // one, and drops it. This is how the Reolink app asks (captured 2026-10-24):
-// channel 0 sub on handle 256, channel 1 main on handle 1.
+// channel 0 sub on handle 256, channel 1 main on handle 1. The zoom's own
+// sub stream is channel 1 sub on handle 257 (256 + channel, as for
+// channel 0).
 const zoomChannel = 1
 
-func startZoom(conn *baichuan.Conn) error {
+// isZoom reports whether stream is one of the zoom lens's two streams.
+func isZoom(stream string) bool {
+	return stream == "zoom" || stream == "zoom_sub"
+}
+
+func startZoom(conn *baichuan.Conn, stream string) error {
 	if err := conn.StartVideoOn(0, 256, baichuan.StreamSub); err != nil {
 		return err
+	}
+	if stream == "zoom_sub" {
+		return conn.StartVideoOn(zoomChannel, 256+zoomChannel, baichuan.StreamSub)
 	}
 	return conn.StartVideoOn(zoomChannel, zoomChannel, baichuan.StreamMain)
 }
@@ -464,4 +494,25 @@ func useZoomOverRTSP(name string) {
 	zoomRTSP[name] = true
 	zoomRTSPMu.Unlock()
 	log.Printf("stream: %s: the zoom lens sent no video over Baichuan; using the camera's RTSP from now on", name)
+}
+
+// ErrPrivacy is a stream that cannot run because the camera is in privacy
+// mode (E1 series): it turns down the preview with status 425, or reports
+// sleep 1 on its own (sleep status report, 623) and stops sending video.
+// Seen in a reocapture log of an E1 Pro (issue #13, 2026-10-25).
+var ErrPrivacy = errors.New("the camera is in privacy mode")
+
+// msgIDSleepStatus is the camera's own report of privacy mode turning on
+// or off.
+const msgIDSleepStatus = 623
+
+// privacyOn reports whether msg says the camera has gone into privacy mode.
+func privacyOn(msg baichuan.Message) bool {
+	switch msg.Header.MsgID {
+	case baichuan.MsgIDVideo:
+		return msg.Header.Status() == 425 && len(msg.Payload) == 0
+	case msgIDSleepStatus:
+		return strings.Contains(strings.Join(strings.Fields(string(msg.XML)), ""), "<sleep>1</sleep>")
+	}
+	return false
 }

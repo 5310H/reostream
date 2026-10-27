@@ -45,6 +45,9 @@ func (s *Server) serveTalk(w http.ResponseWriter, r *http.Request) {
 			Username: cam.Username,
 			Password: cam.Password,
 			Channel:  cam.Channel,
+			// A battery camera keeps port 9000 shut; it talks over the
+			// same UDP session its video uses.
+			UID: cam.UID,
 			// Nothing comes back during talk; the session ends with the button.
 			IdleTimeout: 24 * time.Hour,
 		})

@@ -24,6 +24,22 @@ type cameraPage struct {
 	Title  string
 	Camera Camera
 
+	// Schedules are the weekly schedule grids this category shows
+	// (schedule.go).
+	Schedules []schedSection
+	// Zone is the detection zone editor on the motion page (zones.go).
+	Zone *zoneView
+	// Mask is the privacy mask editor (privacy.go).
+	Mask *maskView
+	// Rules are the smart rules on the smart page (rules.go); RulesRead
+	// says the page asked, so an empty list can say why.
+	Rules     []ruleSet
+	RulesRead bool
+	// TrackLimit is auto tracking's horizontal range (tracklimit.go).
+	TrackLimit *trackLimitView
+	// PrivacyMode is the privacy mode switch (privacymode.go).
+	PrivacyMode *privacyModeView
+
 	// Head is the camera shell (camshell.go); Cat is the settings
 	// category this page shows, empty on the Live tab.
 	Head camHead
@@ -326,10 +342,15 @@ type liveStream struct {
 var catGroups = map[string][]string{
 	"image":   {"Image"},
 	"overlay": {"Name and timestamp"},
-	"lights":  {"Lights"},
+	"lights":  {"Lights", "Spotlight"},
 	"ftp":     {"FTP upload", "FTP server"},
 	"email":   {"Email alerts", "Email server"},
-	"push":    {"Push notifications"},
+	"push":    {"Push notifications", "Push timing"},
+	"detect":  {"Motion detection", "Person detection", "Vehicle detection", "Animal detection"},
+	"record":  {"Recording", "Recording length", "Record audio"},
+	"audio":   {"Speaker", "Noise reduction", "Siren on detection"},
+	"ptz":     {"Tracking method"},
+	"network": {"Remote access", "UPnP", "Firmware updates", "Login lockout"},
 }
 
 // serveCamera is the Live tab: the player, the stream picker and the
@@ -371,7 +392,7 @@ func (s *Server) serveCamera(w http.ResponseWriter, r *http.Request) {
 	}
 
 	codecs := s.codecsByCamera()[cam.Name]
-	suffix := map[string]string{"main": "_main", "sub": "_sub", "extern": "_extern", "zoom": "_zoom"}
+	suffix := map[string]string{"main": "_main", "sub": "_sub", "extern": "_extern", "zoom": "_zoom", "zoom_sub": "_zoom_sub"}
 	page.Battery = s.onDemand(cam.Name)
 	base := s.opts.StreamBase
 	if page.Battery {
@@ -488,7 +509,7 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(page.Groups) > 0 {
+	if _, sched := schedBlocks[cat]; len(page.Groups) > 0 || sched || cat == "detect" || cat == "privacy" || cat == "smart" {
 		ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
 		defer cancel()
 		if conn, err := s.dial(ctx, cam); err != nil {
@@ -496,6 +517,20 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 		} else {
 			defer conn.Close()
 			s.readGroups(ctx, conn, &page)
+			s.readSchedule(ctx, conn, &page, cat)
+			if cat == "detect" {
+				s.readZone(ctx, conn, &page)
+			}
+			if cat == "privacy" {
+				s.readPrivacyMode(ctx, conn, cam.Name, &page)
+				s.readMask(ctx, conn, &page)
+			}
+			if cat == "ptz" {
+				s.readTrackLimit(ctx, conn, &page)
+			}
+			if cat == "smart" {
+				page.Rules, page.RulesRead = s.readRules(ctx, conn), true
+			}
 		}
 	}
 
@@ -591,12 +626,18 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 // is missing is recorded as unavailable, with the reason, rather than
 // drawn as a blank control.
 func (s *Server) readGroups(ctx context.Context, conn *baichuan.Conn, page *cameraPage) {
+	var shown []Group
+	defer func() { page.Groups = shown }()
 	for _, g := range page.Groups {
 		pair, doc, failReason := resolveGroupBlock(ctx, conn, g)
+		if failReason != "" && g.Optional {
+			continue
+		}
+		shown = append(shown, g)
 		if failReason != "" {
 			for _, f := range g.Fields {
 				if f.Kind != "warning" {
-					page.Unavailable[f.XPath] = failReason
+					page.Unavailable[f.Key(f.XPath)] = failReason
 				}
 			}
 			continue
@@ -610,12 +651,12 @@ func (s *Server) readGroups(ctx context.Context, conn *baichuan.Conn, page *came
 			// seedable, and writable, when BOTH of its elements resolved.
 			for _, path := range f.Paths() {
 				if v, ok := fieldValue(doc, path); ok {
-					page.Values[path] = v
+					page.Values[f.Key(path)] = f.shown(v)
 					continue
 				}
 				reason := fmt.Sprintf("%s does not appear in %s on this camera", path, pair.Name)
-				page.Unavailable[path] = reason
-				page.Unavailable[f.XPath] = reason
+				page.Unavailable[f.Key(path)] = reason
+				page.Unavailable[f.Key(f.XPath)] = reason
 			}
 		}
 	}
@@ -629,7 +670,7 @@ type choiceView struct {
 }
 
 func (p cameraPage) Choice(f Field) choiceView {
-	current := p.Values[f.XPath]
+	current := p.Values[f.Key(f.XPath)]
 	view := choiceView{NotRead: current == ""}
 	known := false
 	for _, c := range f.Choices {
@@ -651,7 +692,7 @@ func (p cameraPage) Reset(f Field) string {
 	if !ok {
 		return ""
 	}
-	current := p.Values[f.XPath]
+	current := p.Values[f.Key(f.XPath)]
 	if f.YPath != "" {
 		current += "," + p.Values[f.YPath]
 	}

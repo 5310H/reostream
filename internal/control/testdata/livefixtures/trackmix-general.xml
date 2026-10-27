@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<body>
+<SystemGeneral version="1.1">
+<timeZone>21600</timeZone>
+<osdFormat>MDY</osdFormat>
+<year>2026</year>
+<month>10</month>
+<day>26</day>
+<hour>14</hour>
+<minute>42</minute>
+<second>58</second>
+<deviceId>0</deviceId>
+<timeFormat>1</timeFormat>
+<language>English</language>
+<deviceName>Track mix</deviceName>
+<loginLock>0</loginLock>
+<lockTime>300</lockTime>
+<allowedTimes>10</allowedTimes>
+<isDst>1</isDst>
+</SystemGeneral>
+<Norm version="1.1">
+<norm>NTSC</norm>
+</Norm>
+</body>
+

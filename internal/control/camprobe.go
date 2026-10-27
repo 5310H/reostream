@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
@@ -66,6 +67,58 @@ func newBlockProbe(name string, id uint32, status int16, xml []byte) BlockProbe 
 // dial opens one connection to cam, using opts.Dial when the caller supplied
 // one so tests can substitute a fake camera, and baichuan.Dial otherwise.
 func (s *Server) dial(ctx context.Context, cam Camera) (*baichuan.Conn, error) {
+	// A camera that takes a connection and never answers (an old model
+	// that serves one session at a time) costs a page every dial's full
+	// timeout, and a page dials several times: 16 s for a camera's page,
+	// 48 s for Advanced. One timeout is enough to know; for silentFor
+	// after it the page's dials fail at once instead.
+	key := cam.Address + "/" + cam.UID
+	s.silentMu.Lock()
+	until := s.silentUntil[key]
+	s.silentMu.Unlock()
+	if time.Now().Before(until) {
+		return nil, errCameraSilent
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		// A wired camera answers a login in well under a second; a
+		// battery camera may first have to wake.
+		wait := pageDialTimeout
+		if cam.UID != "" {
+			wait = pageDialTimeoutBattery
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, wait)
+		defer cancel()
+	}
+	conn, err := s.dialCamera(ctx, cam)
+	s.silentMu.Lock()
+	defer s.silentMu.Unlock()
+	switch {
+	case err == nil:
+		delete(s.silentUntil, key)
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded):
+		if s.silentUntil == nil {
+			s.silentUntil = map[string]time.Time{}
+		}
+		s.silentUntil[key] = time.Now().Add(silentFor)
+	}
+	return conn, err
+}
+
+// pageDialTimeout bounds a dial from the page whose request set no deadline
+// of its own.
+var (
+	pageDialTimeout        = 8 * time.Second
+	pageDialTimeoutBattery = 20 * time.Second
+)
+
+// silentFor is how long a camera that timed out is not dialled again from
+// the page.
+var silentFor = 30 * time.Second
+
+var errCameraSilent = errors.New("the camera is not answering (it timed out moments ago; trying again shortly)")
+
+func (s *Server) dialCamera(ctx context.Context, cam Camera) (*baichuan.Conn, error) {
 	if s.opts.Dial != nil {
 		return s.opts.Dial(ctx, cam)
 	}

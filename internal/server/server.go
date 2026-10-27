@@ -114,7 +114,7 @@ func (s *Server) lookup(stem string) (*hub.Hub, bool) {
 	if h, ok := s.src.Hub(stem + "/main"); ok {
 		return h, true
 	}
-	for suffix, stream := range map[string]string{"_sub": "sub", "_extern": "extern", "_zoom": "zoom"} {
+	for suffix, stream := range map[string]string{"_sub": "sub", "_extern": "extern", "_zoom": "zoom", "_zoom_sub": "zoom_sub"} {
 		if cam, cut := strings.CutSuffix(stem, suffix); cut {
 			if h, ok := s.src.Hub(cam + "/" + stream); ok {
 				return h, true

@@ -25,7 +25,8 @@ import (
 // H.264). Run fetches it over Baichuan (see zoomChannel in stream.go); this
 // path is the fallback for a camera whose zoom never sends video that way.
 var nativePaths = map[string]string{
-	"zoom": "Preview_02_main",
+	"zoom":     "Preview_02_main",
+	"zoom_sub": "Preview_02_sub",
 }
 
 // nativeRTSPPort is where Reolink cameras serve RTSP. reostream turns the

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -42,6 +43,11 @@ type Options struct {
 // held or dead session in seconds rather than the minutes the 2026-09-08
 // incident actually ran for.
 const DefaultIdleTimeout = 15 * time.Second
+
+// loginTimeout bounds the login handshake when Dial's ctx carries no
+// deadline of its own. A camera answers a login in well under a second; a
+// var so a test can shorten it.
+var loginTimeout = 20 * time.Second
 
 // Conn is one Baichuan session carrying one stream.
 //
@@ -158,10 +164,46 @@ func newConn(ctx context.Context, nc net.Conn, opts Options) (*Conn, error) {
 		msgs:        make(chan Message, 256),
 		done:        make(chan struct{}),
 	}
-	if dl, ok := ctx.Deadline(); ok {
-		_ = nc.SetDeadline(dl)
+	// Login is plain blocking reads, so on its own it answers neither a
+	// cancelled ctx nor a camera that accepts the connection and then says
+	// nothing. A stream's ctx has no deadline, and a camera that holds a
+	// second connection without answering it (one that allows only one
+	// stream at a time) left that stream's goroutine parked here forever:
+	// nothing logged, no retry, and stopping the stream -- removing the
+	// camera, editing it, shutting down -- waited on it for good. So login
+	// gets a deadline of its own when the caller gave none, and a cancelled
+	// ctx pulls the deadline in to now, which wakes the read.
+	lctx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		lctx, cancel = context.WithTimeout(ctx, loginTimeout)
+		defer cancel()
 	}
-	if err := c.login(); err != nil {
+	dl, _ := lctx.Deadline()
+	_ = nc.SetDeadline(dl)
+	loginDone := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-lctx.Done():
+			_ = nc.SetDeadline(time.Now())
+		case <-loginDone:
+		}
+	}()
+	err := c.login()
+	close(loginDone)
+	<-watcherDone
+	if err != nil {
+		ctxErr := lctx.Err()
+		if ctxErr == nil && errors.Is(err, os.ErrDeadlineExceeded) && !time.Now().Before(dl) {
+			// The socket's deadline can fire a moment before ctx's own
+			// timer marks it done.
+			ctxErr = context.DeadlineExceeded
+		}
+		if ctxErr != nil {
+			return nil, fmt.Errorf("baichuan: login: %w (%v)", ctxErr, err)
+		}
 		return nil, err
 	}
 	_ = nc.SetDeadline(time.Time{})
@@ -498,6 +540,26 @@ func (c *Conn) GetConfig(msgID uint32) error {
 		PayloadOff: uint32(len(body)),
 	}
 	return c.w.Write(h, body)
+}
+
+// Channel is the channel this connection was opened for.
+func (c *Conn) Channel() int { return c.opts.Channel }
+
+// GetConfigWith asks for a configuration block whose read takes a request
+// document as well as the channel, such as the per-type AI settings (342,
+// with <type>people</type>). It goes out in the two-section shape a write
+// uses, which is how the Reolink app sends it.
+func (c *Conn) GetConfigWith(msgID uint32, req []byte) error {
+	ext, err := channelXML(c.opts.Channel)
+	if err != nil {
+		return err
+	}
+	h := Header{
+		MsgID:     msgID,
+		Class:     ClassModern24,
+		EncOffset: EncOffsetFor(byte(c.opts.Channel), 0, c.nextCounter(), 0),
+	}
+	return c.w.WriteParts(h, ext, req)
 }
 
 // SetConfig sends a configuration write.

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<body>
+<aiDenoise Version="1.1">
+<channelId>0</channelId>
+<enable>1</enable>
+<level>4</level>
+</aiDenoise>
+</body>
+

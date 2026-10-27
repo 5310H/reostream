@@ -217,6 +217,8 @@ type Depacketiser struct {
 	buf     []byte
 	filler  int
 	skipped int
+	lost    int
+	gap     bool
 }
 
 func NewDepacketiser() *Depacketiser { return &Depacketiser{} }
@@ -229,10 +231,29 @@ func NewDepacketiser() *Depacketiser { return &Depacketiser{} }
 // cameras put one on continuation messages too (see Message.StartsPacket).
 func (d *Depacketiser) Write(b []byte, startsPacket bool) {
 	if startsPacket {
-		d.filler += len(d.buf)
+		// A video packet still waiting for its bytes is not filler: it
+		// was cut short, and every frame after it refers to a picture
+		// that never arrived. Note it so the stream can skip to the next
+		// keyframe rather than hand a decoder broken references (#17).
+		if isVideoMagic(d.buf) {
+			d.lost++
+			d.gap = true
+		} else {
+			d.filler += len(d.buf)
+		}
 		d.buf = d.buf[:0]
 	}
 	d.buf = append(d.buf, b...)
+}
+
+// Lost reports video packets cut short by the start of the next one.
+func (d *Depacketiser) Lost() int { return d.lost }
+
+// TakeGap reports whether a video packet was lost since the last call.
+func (d *Depacketiser) TakeGap() bool {
+	g := d.gap
+	d.gap = false
+	return g
 }
 
 // Skipped reports bytes discarded because the buffer did not begin with a

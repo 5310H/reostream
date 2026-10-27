@@ -40,6 +40,19 @@ type Camera struct {
 	// going silent, so a recorder's ffmpeg is not restarted over and over
 	// (#13). Off by default: a frozen picture also hides a real outage.
 	HoldPicture bool `toml:"hold_picture"`
+
+	// MotionTopic is an MQTT topic, on the [events] broker, where another
+	// tool reports this camera's motion as ON / OFF: reoevent, which hears
+	// a battery camera's own motion reports on the router. reostream
+	// relays it like the camera's own alerts and, for a battery camera,
+	// wakes it for the motion so its presence stream carries it live.
+	MotionTopic string `toml:"motion_topic"`
+
+	// AlwaysOn keeps a battery camera (one with a UID) streaming around the
+	// clock, like a wired camera, instead of sleeping between viewers and
+	// motion. Only for a battery camera on constant power: on its battery
+	// it drains in days. Off by default.
+	AlwaysOn bool `toml:"always_on"`
 }
 
 // RTSPConfig configures the RTSP listener. Its absence turns RTSP off
@@ -144,6 +157,8 @@ var validStreamNames = map[string]bool{
 	// The TrackMix's zoom lens, read from the camera's own RTSP server:
 	// it is not available over Baichuan. See internal/stream/native.go.
 	"zoom": true,
+	// The zoom lens's sub stream (896x512 on a TrackMix).
+	"zoom_sub": true,
 }
 
 // Load reads and validates the config file at path. A camera address,
@@ -279,6 +294,12 @@ func (c *Config) Validate() error {
 		}
 		if cam.Address == "" {
 			return fmt.Errorf("camera %q has no address", cam.Name)
+		}
+		if cam.MotionTopic != "" && (c.Events == nil || c.Events.MQTT == "") {
+			return fmt.Errorf("camera %q: motion_topic needs an [events] section with mqtt", cam.Name)
+		}
+		if cam.AlwaysOn && cam.UID == "" {
+			return fmt.Errorf("camera %q: always_on is for a battery camera, one with a uid", cam.Name)
 		}
 		if cam.Channel < 0 || cam.Channel > 63 {
 			return fmt.Errorf("camera %q: channel %d is out of range (0 to 63)", cam.Name, cam.Channel)

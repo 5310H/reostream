@@ -430,6 +430,25 @@ func TestCuratedXPathsResolveAgainstRealLiveFixtures(t *testing.T) {
 		"email task get": readTestdata(t, "testdata/livefixtures/trackmix-emailtask.xml"),
 		"email cfg get":  readTestdata(t, "testdata/livefixtures/trackmix-emailcfg.xml"),
 		"push task get":  readTestdata(t, "testdata/livefixtures/trackmix-pushtask.xml"),
+		// The blocks the Reolink-app capture of 2026-10-26 added, read off
+		// the same TrackMix (person detection from the capture itself).
+		"push cfg get":              readTestdata(t, "testdata/livefixtures/trackmix-pushcfg.xml"),
+		"md get":                    readTestdata(t, "testdata/livefixtures/trackmix-md.xml"),
+		"rec task get":              readTestdata(t, "testdata/livefixtures/trackmix-rectask.xml"),
+		"rec cfg get":               readTestdata(t, "testdata/livefixtures/trackmix-reccfg.xml"),
+		"get enc":                   readTestdata(t, "testdata/livefixtures/trackmix-enc.xml"),
+		"audio cfg get":             readTestdata(t, "testdata/livefixtures/trackmix-audiocfg.xml"),
+		"get ai denoise cfg":        readTestdata(t, "testdata/livefixtures/trackmix-denoise.xml"),
+		"audio task get":            readTestdata(t, "testdata/livefixtures/trackmix-audiotask.xml"),
+		"floodlight task get":       readTestdata(t, "testdata/livefixtures/trackmix-floodlighttask.xml"),
+		"ai cfg get":                readTestdata(t, "testdata/livefixtures/trackmix-aicfg.xml"),
+		"ai detect cfg get#people":  readTestdata(t, "testdata/livefixtures/trackmix-aidetect-people.xml"),
+		"ai detect cfg get#vehicle": readTestdata(t, "testdata/livefixtures/trackmix-aidetect-people.xml"),
+		"ai detect cfg get#dog_cat": readTestdata(t, "testdata/livefixtures/trackmix-aidetect-people.xml"),
+		"get upnp":                  readTestdata(t, "testdata/livefixtures/trackmix-upnp.xml"),
+		"get ptop":                  readTestdata(t, "testdata/livefixtures/trackmix-ptop.xml"),
+		"get auto update":           readTestdata(t, "testdata/livefixtures/trackmix-autoupdate.xml"),
+		"get general":               readTestdata(t, "testdata/livefixtures/trackmix-general.xml"),
 	}
 	want := map[string]string{
 		"OsdChannelName/name":   "Rear Bay",
@@ -453,6 +472,11 @@ func TestCuratedXPathsResolveAgainstRealLiveFixtures(t *testing.T) {
 		"EmailTask/enable":                   "1",
 		"Email/smtpPort":                     "465",
 		"PushTask/enable":                    "1",
+		"PushCfg/interval":                   "20",
+		"RecordCfg/recordDelayTime":          "15",
+		"mainStream/audio":                   "0",
+		"aiDenoise/level":                    "4",
+		"AiCfg/smartTrackMode":               "2",
 	}
 	for _, g := range groups() {
 		for _, f := range g.Fields {

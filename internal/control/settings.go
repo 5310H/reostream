@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
@@ -59,6 +60,21 @@ type Field struct {
 	// label says everything.
 	Help string
 
+	// Invert, when non-zero, is a number field the camera stores upside
+	// down: the page shows Invert minus the stored value and writes Invert
+	// minus what is entered, matching the Reolink app.
+	Invert int
+
+	// Also lists further elements a toggle sets to the same value in the
+	// same write: record audio is one switch, but the main and the sub
+	// stream each carry their own <audio>.
+	Also []string
+
+	// Variant is the "#..." part of the group's block, stamped by groups():
+	// the same paths in different documents (person, vehicle and animal
+	// detection) keep their values apart on the page. See Key.
+	Variant string
+
 	// Choices, on a Kind "choice" field, are the values offered as stops.
 	// Only the value the camera was seen holding is observed; the rest are
 	// the firmware's documented spellings. The camera's own value is always
@@ -79,10 +95,44 @@ func (f Field) Paths() []string {
 	if f.XPath == "" {
 		return nil
 	}
-	if f.YPath == "" {
-		return []string{f.XPath}
+	out := []string{f.XPath}
+	if f.YPath != "" {
+		out = append(out, f.YPath)
 	}
-	return []string{f.XPath, f.YPath}
+	return append(out, f.Also...)
+}
+
+// shown is the value the page presents for a stored one.
+func (f Field) shown(stored string) string {
+	if f.Invert == 0 {
+		return stored
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(stored))
+	if err != nil {
+		return stored
+	}
+	return strconv.Itoa(f.Invert - n)
+}
+
+// stored is the value written for one entered on the page.
+func (f Field) stored(entered string) (string, error) {
+	if f.Invert == 0 {
+		return entered, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(entered))
+	if err != nil {
+		return "", fmt.Errorf("%s takes a whole number, not %q", f.Label, entered)
+	}
+	return strconv.Itoa(f.Invert - n), nil
+}
+
+// Key is where the page keeps the value read from path: the path itself,
+// or the variant and the path for a field in a variant block.
+func (f Field) Key(path string) string {
+	if f.Variant == "" {
+		return path
+	}
+	return f.Variant + ":" + path
 }
 
 // FormXPath is what the settings form posts as this field's xpath: the one
@@ -90,7 +140,10 @@ func (f Field) Paths() []string {
 // together. A single-element field posts exactly the string it always did,
 // so nothing about an existing form's wire format changes.
 func (f Field) FormXPath() string {
-	return strings.Join(f.Paths(), ",")
+	if f.YPath == "" {
+		return f.XPath
+	}
+	return f.XPath + "," + f.YPath
 }
 
 // Group is one curated section of the settings page, every field editing
@@ -130,6 +183,10 @@ type Group struct {
 	// Reboots marks a group whose every write restarts the camera (the
 	// encoder blocks do this). It is the highest of the three save tiers.
 	Reboots bool
+	// Optional hides the whole group on a camera that does not answer its
+	// block, rather than listing every field as not available: a spotlight
+	// or AI noise reduction is something a model has or has not.
+	Optional bool
 	// Untested marks a group whose fields were read off a real camera but
 	// whose writes nobody has yet watched take effect on one. It shows as
 	// the hollow dot, the redesign's fourth tier.
@@ -259,6 +316,18 @@ func osdCorners() []osdCorner {
 // reordering these groups makes that test time out rather than say what
 // changed.
 func groups() []Group {
+	gs := curatedGroups()
+	for i := range gs {
+		if _, v, ok := strings.Cut(gs[i].Blocks[0], "#"); ok {
+			for j := range gs[i].Fields {
+				gs[i].Fields[j].Variant = v
+			}
+		}
+	}
+	return gs
+}
+
+func curatedGroups() []Group {
 	return []Group{
 		{
 			Title: "Name and timestamp",
@@ -302,6 +371,11 @@ func groups() []Group {
 				// (1,1, ceiling mounted) and an RLC-810A (0,0).
 				{Label: "Flip horizontally", XPath: "InputAdvanceCfg/mirror", Kind: "toggle", Slug: "image-mirror", Help: "For a camera seen in a mirror or mounted facing the other way."},
 				{Label: "Flip vertically", XPath: "InputAdvanceCfg/flip", Kind: "toggle", Slug: "image-flip", Help: "For a camera mounted upside down, on a ceiling."},
+				// The two below were captured from the Reolink app writing
+				// isp set (25) on a TrackMix, 2026-10-26.
+				{Label: "Sharpness", XPath: "VideoInput/sharpen", Kind: "number", Slug: "image-sharpness"},
+				{Label: "Anti-flicker", XPath: "InputAdvanceCfg/PowerLineFrequency/mode", Kind: "choice", Slug: "image-antiflicker", Help: "Match your mains frequency to stop lights flickering in the picture: 60 Hz in the Americas, 50 Hz in most other places.",
+					Choices: []Choice{{"50hz", "50 Hz"}, {"60hz", "60 Hz"}}},
 			},
 		},
 		{
@@ -402,6 +476,142 @@ func groups() []Group {
 				{Label: "Send push notifications", XPath: "PushTask/enable", Kind: "toggle", Slug: "push-enable", Help: "Delivered through Reolink's cloud to the Reolink app."},
 			},
 		},
+		// Everything below was captured from the Reolink Android app (4.63)
+		// writing to a TrackMix, a Duo and a fisheye through reocapture on
+		// 2026-10-26; see the settings map in the reocapture notes.
+		{
+			Title:    "Push timing",
+			Optional: true,
+			Blocks:   []string{"push cfg get"},
+			Fields: []Field{
+				{Label: "Time between notifications", XPath: "PushCfg/interval", Kind: "choice", Slug: "push-interval", Help: "The shortest gap between two notifications, in seconds.",
+					Choices: []Choice{{"20", "20 s"}, {"30", "30 s"}, {"60", "1 min"}, {"120", "2 min"}}},
+			},
+		},
+		{
+			Title:    "Motion detection",
+			Optional: true,
+			Blocks:   []string{"md get"},
+			Fields: []Field{
+				{Label: "Motion detection", XPath: "MD/enable", Kind: "toggle", Slug: "md-enable", Governs: "md-sensitivity"},
+				{Label: "Sensitivity", XPath: "MD/sensInfoNew/sensitivityDefault", Kind: "number", Invert: 51, Slug: "md-sensitivity", Help: "1 to 50. Higher notices smaller changes, like a person far away."},
+			},
+		},
+		aiDetectGroup("Person detection", "people"),
+		aiDetectGroup("Vehicle detection", "vehicle"),
+		aiDetectGroup("Animal detection", "dog_cat"),
+		{
+			Title:    "Recording",
+			Optional: true,
+			Blocks:   []string{"rec task get"},
+			Blurb:    "To the camera's own SD card.",
+			Fields: []Field{
+				{Label: "Record to SD card", XPath: "Record/enable", Kind: "toggle", Slug: "rec-enable"},
+			},
+		},
+		{
+			Title:    "Recording length",
+			Optional: true,
+			Blocks:   []string{"rec cfg get"},
+			Fields: []Field{
+				{Label: "Keep recording after motion ends", XPath: "RecordCfg/recordDelayTime", Kind: "choice", Slug: "rec-post",
+					Choices: []Choice{{"15", "15 s"}, {"30", "30 s"}, {"60", "1 min"}}},
+				{Label: "Overwrite oldest recordings", XPath: "RecordCfg/cycle", Kind: "toggle", Slug: "rec-cycle", Help: "When the card is full, record over the oldest files instead of stopping."},
+			},
+		},
+		{
+			Title:            "Record audio",
+			Optional:         true,
+			Blocks:           []string{"get enc"},
+			InterruptsStream: true,
+			Blurb:            "Turning this on or off restarts the camera's streams for a moment.",
+			Fields: []Field{
+				{Label: "Record audio", XPath: "mainStream/audio", Also: []string{"subStream/audio"}, Kind: "toggle", Slug: "audio-record", Help: "Sound in live view, in recordings and in every reostream stream."},
+			},
+		},
+		{
+			Title:    "Speaker",
+			Optional: true,
+			Blocks:   []string{"audio cfg get"},
+			Fields: []Field{
+				{Label: "Volume", XPath: "audioCfg/volume", Kind: "number", Slug: "audio-volume", Help: "0 to 100, for talk and the siren."},
+				{Label: "Siren sound", XPath: "audioCfg/audioSelect", Kind: "choice", Slug: "audio-select", Help: "Custom is the sound uploaded below.",
+					Choices: []Choice{{"0", "Default"}, {"1", "Custom"}}},
+			},
+		},
+		{
+			Title:    "Noise reduction",
+			Optional: true,
+			Blocks:   []string{"get ai denoise cfg"},
+			Fields: []Field{
+				{Label: "Noise reduction", XPath: "aiDenoise/enable", Kind: "toggle", Slug: "audio-denoise", Governs: "audio-denoise-level"},
+				{Label: "Level", XPath: "aiDenoise/level", Kind: "number", Slug: "audio-denoise-level"},
+			},
+		},
+		{
+			Title:         "Siren on detection",
+			Optional:      true,
+			Blocks:        []string{"audio task get"},
+			ConfirmReason: "The siren sounds out loud on every detection while this is on.",
+			Fields: []Field{
+				{Label: "Sound the siren on detection", XPath: "AudioTask/enable", Kind: "toggle", Slug: "siren-enable"},
+			},
+		},
+		{
+			Title:         "Spotlight",
+			Optional:      true,
+			Blocks:        []string{"floodlight task get"},
+			ConfirmReason: lightsConfirmReason,
+			Fields: []Field{
+				{Label: "Brightness", XPath: "FloodlightTask/brightness_cur", Kind: "number", Slug: "spot-brightness"},
+				{Label: "Schedule starts (hour)", XPath: "FloodlightTask/schedule/startHour", Kind: "number", Slug: "spot-start"},
+				{Label: "Schedule ends (hour)", XPath: "FloodlightTask/schedule/endHour", Kind: "number", Slug: "spot-end"},
+			},
+		},
+		// The four below were proved on a TrackMix by flipping each, reading
+		// it back and restoring it (2026-10-26).
+		{
+			Title:         "Remote access",
+			Blocks:        []string{"get ptop"},
+			Optional:      true,
+			ConfirmReason: "Turning Reolink P2P off stops the Reolink app reaching this camera by its UID, including from outside your network.",
+			Fields: []Field{
+				{Label: "Reolink P2P (UID access)", XPath: "PTOP/enable", Kind: "toggle", Slug: "net-p2p", Help: "How the Reolink app reaches the camera without its IP address. reostream does not need it."},
+			},
+		},
+		{
+			Title:    "UPnP",
+			Blocks:   []string{"get upnp"},
+			Optional: true,
+			Fields: []Field{
+				{Label: "UPnP port forwarding", XPath: "Upnp/enable", Kind: "toggle", Slug: "net-upnp", Help: "Lets the camera open ports on your router by itself. Usually best off."},
+			},
+		},
+		{
+			Title:    "Firmware updates",
+			Blocks:   []string{"get auto update"},
+			Optional: true,
+			Fields: []Field{
+				{Label: "Update automatically", XPath: "AutoUpdate/enable", Kind: "toggle", Slug: "sys-autoupdate", Help: "The camera installs new firmware from Reolink by itself."},
+			},
+		},
+		{
+			Title:    "Login lockout",
+			Blocks:   []string{"get general"},
+			Optional: true,
+			Fields: []Field{
+				{Label: "Lock out after failed logins", XPath: "SystemGeneral/loginLock", Kind: "toggle", Slug: "sys-loginlock", Help: "After several wrong passwords within 3 minutes, the camera refuses logins for a few minutes."},
+			},
+		},
+		{
+			Title:    "Tracking method",
+			Optional: true,
+			Blocks:   []string{"ai cfg get"},
+			Fields: []Field{
+				{Label: "How it follows", XPath: "AiCfg/smartTrackMode", Kind: "choice", Slug: "track-mode", Help: "Digital zooms the second lens only; pan/tilt turns the camera.",
+					Choices: []Choice{{"2", "Digital only"}, {"3", "Digital first"}, {"4", "Pan/tilt first"}}},
+			},
+		},
 	}
 }
 
@@ -410,12 +620,63 @@ func groups() []Group {
 // how one of a Group's Blocks candidates gets resolved back to the ids a
 // handler needs to seed and write its fields.
 func pairForName(name string) (baichuan.ConfigPair, bool) {
+	name, _, _ = strings.Cut(name, "#")
 	for _, p := range baichuan.ConfigPairs() {
 		if p.Name == name {
 			return p, true
 		}
 	}
 	return baichuan.ConfigPair{}, false
+}
+
+// aiDetectGroup is one object type's own detection settings. The camera
+// keeps one AiDetectCfg per type and reads it with the type named in the
+// request, hence the variant block.
+func aiDetectGroup(title, kind string) Group {
+	return Group{
+		Title:    title,
+		Optional: true,
+		Blocks:   []string{"ai detect cfg get#" + kind},
+		Fields: []Field{
+			{Label: "Sensitivity", XPath: "AiDetectCfg/sensitivity", Kind: "number", Slug: "ai-" + kind + "-sensitivity", Help: "0 to 100. Higher catches more, and more false alarms."},
+			{Label: "Alarm delay (seconds)", XPath: "AiDetectCfg/stayTime", Kind: "number", Slug: "ai-" + kind + "-delay", Help: "How long it has to be there before it counts. 0 to 8."},
+		},
+	}
+}
+
+// blockRequest is the request document a variant block is read with (see
+// Group.Blocks: "name#variant"), or nil for a block read with only its
+// channel.
+func blockRequest(name string, channel int) []byte {
+	base, v, ok := strings.Cut(name, "#")
+	if !ok {
+		return nil
+	}
+	switch base {
+	case "ai detect cfg get":
+		// The Reolink app's own request, captured 2026-10-26.
+		return []byte(fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AiDetectCfg version=\"1.1\">\n<chn>%d</chn>\n<type>%s</type>\n</AiDetectCfg>\n</body>\n", channel, v))
+	}
+	return nil
+}
+
+// expandAlso adds, for each edit of a field with Also paths, the same
+// value written to each of them.
+func expandAlso(block string, edits []edit) ([]edit, error) {
+	out := append([]edit(nil), edits...)
+	for _, e := range edits {
+		f, ok := curatedField(block, e.XPath)
+		if !ok {
+			return nil, fmt.Errorf("%s %s is not a curated field", block, e.XPath)
+		}
+		if e.XPath != f.XPath {
+			continue
+		}
+		for _, a := range f.Also {
+			out = append(out, edit{XPath: a, Value: e.Value})
+		}
+	}
+	return out, nil
 }
 
 // setField locates the element xpath names and replaces only its text
@@ -592,7 +853,7 @@ func resolveGroupBlock(ctx context.Context, conn *baichuan.Conn, g Group) (pair 
 			continue
 		}
 		readCtx, readCancel := context.WithTimeout(ctx, readTimeout)
-		d, status, err := baichuan.ReadConfig(readCtx, conn, p.Get)
+		d, status, err := baichuan.ReadConfigWith(readCtx, conn, p.Get, blockRequest(name, conn.Channel()))
 		readCancel()
 		if err != nil {
 			lastReason = fmt.Sprintf("reading %s: %v", name, err)
@@ -732,6 +993,19 @@ func (s *Server) serveApplySetting(w http.ResponseWriter, r *http.Request) {
 			field = f
 		}
 	}
+	for i, e := range edits {
+		f, _ := curatedField(block, e.XPath)
+		v, err := f.stored(e.Value)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		edits[i].Value = v
+	}
+	if edits, err = expandAlso(block, edits); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	pair, ok := pairForName(block)
 	if !ok {
 		http.Error(w, fmt.Sprintf("%q is not a known block", block), http.StatusBadRequest)
@@ -753,7 +1027,8 @@ func (s *Server) serveApplySetting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	readCtx, readCancel := context.WithTimeout(ctx, readTimeout)
-	doc, status, err := baichuan.ReadConfig(readCtx, conn, pair.Get)
+	req := blockRequest(block, conn.Channel())
+	doc, status, err := baichuan.ReadConfigWith(readCtx, conn, pair.Get, req)
 	readCancel()
 	conn.Close()
 	if err != nil {
@@ -798,7 +1073,7 @@ func (s *Server) serveApplySetting(w http.ResponseWriter, r *http.Request) {
 		body = next
 	}
 
-	result, err := s.writeBlock(ctx, cam, pair.Set, body, true)
+	result, err := s.writeBlockWith(ctx, cam, pair.Set, body, true, req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

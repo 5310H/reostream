@@ -20,6 +20,7 @@
 {{with .Model}}<span>{{.}}</span>{{end}}
 <a class="mono camhead-ip" href="http://{{.Address}}" target="_blank" rel="noopener noreferrer" title="Open the camera's own page">{{.Address}}&nbsp;&#8599;</a>
 {{with .Firmware}}<span class="mono">{{.}}</span>{{end}}
+{{with .WiFi}}<span class="mono" title="Wi-Fi signal strength: closer to 0 is stronger; weaker than about -70 dBm tends to drop frames">Wi-Fi {{.}} dBm</span>{{end}}
 </span>
 </div>
 <nav class="tabs camtabs">

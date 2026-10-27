@@ -130,7 +130,7 @@ func (s *Server) copyGroupTo(ctx context.Context, g Group, srcDoc []byte, name s
 		}
 		return ""
 	}
-	res, err := s.writeBlock(ctx, target, pair.Set, body, true)
+	res, err := s.writeBlockWith(ctx, target, pair.Set, body, true, blockRequest(g.Blocks[0], target.Channel))
 	if err != nil {
 		return err.Error()
 	}

@@ -52,7 +52,7 @@ var templateFS embed.FS
 // before this was changed: a creds.toml placed in this directory was served
 // to an unauthenticated request with every test still green.
 //
-//go:embed assets/style.css assets/dashboard.js assets/settings.js assets/snapshot.js assets/fisheye.js assets/fisheyeview.js assets/align.js assets/encoding.js assets/talk.js assets/live.js assets/rec.js assets/mpegts.js assets/mpegts.js.LICENSE.txt assets/LICENSE-mpegts.txt assets/README.md
+//go:embed assets/style.css assets/dashboard.js assets/settings.js assets/snapshot.js assets/fisheye.js assets/fisheyeview.js assets/align.js assets/encoding.js assets/talk.js assets/live.js assets/rec.js assets/schedule.js assets/zone.js assets/mask.js assets/rules.js assets/sound.js assets/mpegts.js assets/mpegts.js.LICENSE.txt assets/LICENSE-mpegts.txt assets/README.md
 var assetFS embed.FS
 
 // assetSub drops the "assets" prefix so the URL and the file path match.
@@ -288,6 +288,11 @@ type Server struct {
 	// bound themselves; a real install never sets it, because a Reolink
 	// camera never serves Baichuan anywhere else.
 	sweepPort int
+
+	// silentMu guards silentUntil: when a camera last timed out on a dial
+	// from this page, keyed by address and uid. See dial.
+	silentMu    sync.Mutex
+	silentUntil map[string]time.Time
 }
 
 // templateFuncs is the function set every page is rendered with.
@@ -314,6 +319,10 @@ func templateFuncs(opts Options) template.FuncMap {
 		"paletteIndex": func() template.JS { return paletteIndex(opts.ConfigPath) },
 		"streamOf":     streamOf,
 		"version":      buildVersion,
+		"contains":     strings.Contains,
+		"lower":        strings.ToLower,
+		"inc":          func(n int) int { return n + 1 },
+		"split":        strings.Fields,
 	}
 }
 
@@ -435,6 +444,14 @@ var routePatterns = []string{
 	"POST /cameras/{name}/remove",
 	"GET /cameras/{name}",
 	"POST /cameras/{name}/settings",
+	"POST /cameras/{name}/schedule",
+	"POST /cameras/{name}/zone",
+	"POST /cameras/{name}/mask",
+	"POST /cameras/{name}/rule",
+	"POST /cameras/{name}/sound",
+	"POST /cameras/{name}/sound/test",
+	"POST /cameras/{name}/tracklimit",
+	"POST /cameras/{name}/privacymode",
 	"GET /cameras/{name}/settings",
 	"GET /cameras/{name}/settings/{cat}",
 	"GET /settings",
@@ -531,6 +548,14 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /cameras/{name}/remove", s.wrap(http.HandlerFunc(s.serveRemoveCamera)))
 	mux.Handle("GET /cameras/{name}", s.wrap(http.HandlerFunc(s.serveCamera)))
 	mux.Handle("POST /cameras/{name}/settings", s.wrap(http.HandlerFunc(s.serveApplySetting)))
+	mux.Handle("POST /cameras/{name}/schedule", s.wrap(http.HandlerFunc(s.serveSchedule)))
+	mux.Handle("POST /cameras/{name}/zone", s.wrap(http.HandlerFunc(s.serveZone)))
+	mux.Handle("POST /cameras/{name}/mask", s.wrap(http.HandlerFunc(s.serveMask)))
+	mux.Handle("POST /cameras/{name}/rule", s.wrap(http.HandlerFunc(s.serveRule)))
+	mux.Handle("POST /cameras/{name}/sound", s.wrap(http.HandlerFunc(s.serveSound)))
+	mux.Handle("POST /cameras/{name}/sound/test", s.wrap(http.HandlerFunc(s.serveSoundTest)))
+	mux.Handle("POST /cameras/{name}/tracklimit", s.wrap(http.HandlerFunc(s.serveTrackLimit)))
+	mux.Handle("POST /cameras/{name}/privacymode", s.wrap(http.HandlerFunc(s.servePrivacyMode)))
 	mux.Handle("GET /cameras/{name}/settings", s.wrap(http.HandlerFunc(s.serveCameraSettingsIndex)))
 	mux.Handle("GET /cameras/{name}/settings/{cat}", s.wrap(http.HandlerFunc(s.serveCameraSettings)))
 	mux.Handle("POST /cameras/{name}/netport", s.wrap(http.HandlerFunc(s.serveApplyNetPort)))

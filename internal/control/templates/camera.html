@@ -96,6 +96,13 @@
 {{if .CGIErr}}<p class="outcome-refused">{{.CGIErr}}</p>{{end}}
 
 {{range $i, $group := .Groups}}{{template "settingsgroup" dict "G" $group "P" $ "Preview" (and (eq $i 0) (or (eq $.Cat "image") (eq $.Cat "overlay")))}}{{end}}
+{{with .Zone}}{{template "zone" dict "Z" . "P" $}}{{end}}
+{{with .PrivacyMode}}{{template "privacymode" dict "V" . "P" $}}{{end}}
+{{with .Mask}}{{template "mask" dict "M" . "P" $}}{{end}}
+{{if .RulesRead}}{{if not .Rules}}<section><p class="hint">This camera has no smart rules (line crossing, zone intrusion and the like).</p></section>{{end}}{{range .Rules}}{{template "rules" dict "R" . "P" $}}{{end}}{{end}}
+{{if and (eq .Cat "audio") (index .ResolvedBlock "Speaker")}}{{template "sound" .}}{{end}}
+{{with .TrackLimit}}{{template "tracklimit" dict "T" . "P" $}}{{end}}
+{{range .Schedules}}{{template "schedule" dict "S" . "P" $}}{{end}}
 
 {{if eq .Cat "streams"}}
 {{if .Encoding.Have}}
@@ -482,6 +489,11 @@ function netConfirm(f) {
 <script src="/assets/settings.js"></script>
 <script src="/assets/encoding.js"></script>
 <script src="/assets/live.js"></script>
+<script src="/assets/schedule.js"></script>
+<script src="/assets/zone.js"></script>
+<script src="/assets/mask.js"></script>
+<script src="/assets/rules.js"></script>
+<script src="/assets/sound.js"></script>
 {{end}}
 {{end}}
 
@@ -520,16 +532,16 @@ function netConfirm(f) {
 <summary><span class="mark">!</span>Before you change these</summary>
 <p>{{.Label}}</p>
 </details>
-{{else if index $.Unavailable .XPath}}
+{{else if index $.Unavailable (.Key .XPath)}}
 {{/* A curated field whose read failed, or whose path this camera's
      document does not carry, says so where the control would be: never a
      blank editable input that only fails once someone submits it. */}}
 <div class="setting">
 <p><span class="tier tier-{{$group.Tier}}" title="{{$group.TierLabel}}"></span>{{.Label}}</p>
-<p class="warning">not available: {{index $.Unavailable .XPath}}</p>
+<p class="warning">not available: {{index $.Unavailable (.Key .XPath)}}</p>
 </div>
 {{else}}
-{{$current := index $.Values .XPath}}{{$field := .}}
+{{$current := index $.Values (.Key .XPath)}}{{$field := .}}
 <div class="setting" id="row-{{.Slug}}">
 <p><span class="tier tier-{{$group.Tier}}" title="{{$group.TierLabel}}"></span>{{.Label}}{{with .Help}}{{template "info" .}}{{end}}{{if $.Reset .}}<span class="changed" title="Changed from factory"></span>{{end}}</p>
 <form class="control autosave" method="post" action="/cameras/{{$.Camera.Name}}/settings"{{if $group.ConfirmReason}} onsubmit="return confirm('{{$group.ConfirmReason}}')"{{end}}>
@@ -626,4 +638,183 @@ window.addEventListener("load", function () {
   if (window.reostreamSnapshots) reostreamSnapshots(document.querySelectorAll(".cam-video[data-src]"));
 });
 </script>
+{{end}}
+
+{{define "schedule"}}
+{{$s := .S}}{{$ := .P}}
+{{/* A week of hours, one cell each, Sunday first, as the camera stores it:
+     slot day*24+hour. Each kind of detection has its own table; the tabs
+     pick which one the grid edits, and Save writes only that one. */}}
+<section class="sched">
+<div class="sec-head"><h2>{{$s.Title}}</h2><span class="sec-where">on camera</span></div>
+{{with $s.Blurb}}<p class="hint">{{.}}</p>{{end}}
+<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/schedule">
+<input type="hidden" name="block" value="{{$s.Block}}">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="type" value="">
+<input type="hidden" name="index" value="">
+<input type="hidden" name="table" value="">
+{{if gt (len $s.Items) 1}}
+<div class="sched-tabs" role="tablist">
+{{range $i, $it := $s.Items}}<button type="button" role="tab" class="sched-tab" data-type="{{$it.Type}}" data-index="{{$it.Index}}" data-table="{{$it.Table}}"{{if eq $i 0}} aria-selected="true"{{end}}>{{$it.Label}}</button>{{end}}
+</div>
+{{else}}
+{{range $s.Items}}<span class="sched-tab" hidden data-type="{{.Type}}" data-index="{{.Index}}" data-table="{{.Table}}" aria-selected="true"></span>{{end}}
+{{end}}
+<div class="sched-grid" aria-label="{{$s.Title}}: tap or drag across hours to switch them on or off"></div>
+<div class="sched-actions">
+<button type="button" class="linkish sched-all">All on</button>
+<button type="button" class="linkish sched-none">All off</button>
+<button type="submit" class="sched-save" disabled>Save</button>
+</div>
+</form>
+</section>
+{{end}}
+
+{{define "zone"}}
+{{$z := .Z}}{{$ := .P}}
+{{/* The detection zone over the live picture: the camera's own grid of
+     cells, lit where it detects. One zone, written to motion and to every
+     AI type at once, as the Reolink app does. */}}
+<section class="zone">
+<div class="sec-head"><h2>Detection zone</h2><span class="sec-where">on camera</span></div>
+<p class="hint">Paint out the places to ignore, like a road or a tree that moves in the wind.{{if $z.HasAI}} Applies to motion, people, vehicles and animals.{{end}}</p>
+<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/zone">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="mask" value="{{$z.Mask}}">
+<div class="zone-wrap" data-w="{{$z.W}}" data-h="{{$z.H}}" style="aspect-ratio: {{$z.W}} / {{$z.H}}">
+{{with $.Group.Tile}}{{if .Playable}}<div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div>{{end}}{{end}}
+<canvas class="zone-canvas" aria-label="Detection zone, {{$z.W}} by {{$z.H}} cells"></canvas>
+</div>
+<div class="zone-actions">
+<div class="segmented zone-tool" role="radiogroup" aria-label="Brush">
+<label><input type="radio" name="zone-tool" value="0" checked><span>Ignore</span></label>
+<label><input type="radio" name="zone-tool" value="1"><span>Detect</span></label>
+</div>
+<button type="button" class="linkish zone-all">Detect everywhere</button>
+<button type="submit" class="zone-save" disabled>Save</button>
+</div>
+</form>
+</section>
+{{end}}
+
+{{define "mask"}}
+{{$m := .M}}{{$ := .P}}
+{{/* Black boxes the camera draws into every stream and recording. Drag on
+     the picture to add one; tap one to select it, then Remove. */}}
+<section class="mask">
+<div class="sec-head"><h2>Privacy mask</h2><span class="sec-where">on camera</span></div>
+<p class="hint">Black out up to {{$m.Max}} areas, like a neighbour's window. They are blacked out in every stream and recording, including Frigate's.</p>
+<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/mask">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="rects" value="{{$m.Rects}}">
+<div class="mask-wrap" data-max="{{$m.Max}}">
+{{with $.Group.Tile}}{{if .Playable}}<div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div>{{end}}{{end}}
+<div class="mask-layer" aria-label="Privacy mask boxes"></div>
+</div>
+<div class="zone-actions">
+<button type="button" class="linkish mask-remove" disabled>Remove selected</button>
+<button type="button" class="linkish mask-clear">Remove all</button>
+<button type="submit" class="mask-save" disabled>Save</button>
+</div>
+</form>
+</section>
+<script>
+window.addEventListener("load", function () {
+  if (window.reostreamSnapshots) reostreamSnapshots(document.querySelectorAll(".mask-wrap .cam-video[data-src]"));
+});
+</script>
+{{end}}
+
+{{define "rules"}}
+{{$set := .R}}{{$ := .P}}{{$k := $set.Kind}}
+<section class="rules">
+<div class="sec-head"><h2>{{$k.Title}}</h2><span class="sec-where">on camera &middot; {{len $set.Rules}} of {{$set.Max}}</span></div>
+<p class="hint">{{$k.Blurb}} Drag the points on the picture.</p>
+{{range $set.Rules}}
+<form class="control rule" method="post" action="/cameras/{{$.Camera.Name}}/rule" data-line="{{if $k.Line}}1{{end}}" data-min="{{$set.MinPoints}}" data-max="{{$set.MaxPoints}}">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="kind" value="{{$k.Key}}">
+<input type="hidden" name="index" value="{{.Index}}">
+<input type="hidden" name="op" value="modify">
+<input type="hidden" name="points" value="{{.Points}}">
+<div class="rule-wrap">
+{{with $.Group.Tile}}{{if .Playable}}<div class="cam-video" data-src="{{.URL}}" data-autoplay="1"><img alt="" hidden><video muted playsinline hidden></video></div>{{end}}{{end}}
+<svg class="rule-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="{{$k.Title}} {{.Name}}"></svg>
+</div>
+<div class="rule-fields">
+<label>Name <input type="text" name="rname" value="{{.Name}}" maxlength="31"></label>
+{{if $k.HasAIType}}{{$t := .AIType}}<span class="rule-types">
+<label><input type="checkbox" name="aitype" value="people"{{if contains $t "people"}} checked{{end}}> Person</label>
+<label><input type="checkbox" name="aitype" value="vehicle"{{if contains $t "vehicle"}} checked{{end}}> Vehicle</label>
+<label><input type="checkbox" name="aitype" value="dog_cat"{{if contains $t "dog_cat"}} checked{{end}}> Animal</label>
+</span>{{end}}
+<label>Sensitivity <input type="number" name="sensitivity" min="0" max="100" value="{{.Sensitivity}}"></label>
+{{if $k.StayTag}}<label>Seconds <input type="number" name="stay" min="0" max="30" value="{{.Stay}}"></label>{{end}}
+{{if $k.Line}}<input type="hidden" name="direction" value="{{.Direction}}">{{end}}
+</div>
+<div class="zone-actions">
+{{if not $k.Line}}<button type="button" class="linkish rule-addpt">Add point</button><button type="button" class="linkish rule-delpt">Remove point</button>{{end}}
+<button type="submit" class="linkish danger rule-delete" formnovalidate onclick="this.form.op.value='delete'; return confirm('Delete this rule?')">Delete</button>
+<button type="submit" class="rule-save">Save</button>
+</div>
+</form>
+{{end}}
+{{if lt (len $set.Rules) $set.Max}}
+<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/rule">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="kind" value="{{$k.Key}}">
+<input type="hidden" name="op" value="add">
+<input type="hidden" name="rname" value="{{$k.Title}} {{len $set.Rules | inc}}">
+{{if $k.HasAIType}}<input type="hidden" name="aitype" value="people"><input type="hidden" name="aitype" value="vehicle"><input type="hidden" name="aitype" value="dog_cat">{{end}}
+<input type="hidden" name="sensitivity" value="50">
+{{if $k.StayTag}}<input type="hidden" name="stay" value="3">{{end}}
+{{if $k.Line}}<input type="hidden" name="direction" value="both"><input type="hidden" name="points" value="0.25,0.5;0.75,0.5">{{else}}<input type="hidden" name="points" value="0.25,0.25;0.75,0.25;0.75,0.75;0.25,0.75">{{end}}
+<button type="submit">Add {{$k.Title | lower}}</button>
+</form>
+{{end}}
+</section>
+{{end}}
+
+{{define "sound"}}
+<section class="sound" data-camera="{{.Camera.Name}}">
+<div class="sec-head"><h2>Custom siren sound</h2><span class="sec-where">on camera</span></div>
+<p class="hint">Any audio file, up to 5 seconds (longer files are cut). It plays from the camera's speaker as the siren, and as the sound test.</p>
+<div class="zone-actions">
+<input type="file" class="sound-file" accept="audio/*" aria-label="Sound file">
+<button type="button" class="sound-upload" disabled>Upload</button>
+<button type="button" class="linkish sound-test">Play on camera</button>
+</div>
+<p class="hint sound-msg" aria-live="polite"></p>
+</section>
+{{end}}
+
+{{define "tracklimit"}}
+{{$t := .T}}{{$ := .P}}
+<section>
+<div class="sec-head"><h2>Tracking range</h2><span class="sec-where">on camera</span></div>
+<p class="hint">How far left and right auto tracking may turn. Turn the camera to an end with the arrows above, then set that end.{{if $t.HavePan}} It points at pan position {{$t.Pan}} now.{{end}}</p>
+<div class="setting"><p>Left limit</p><p class="exact">{{$t.Label $t.Left}}</p></div>
+<div class="setting"><p>Right limit</p><p class="exact">{{$t.Label $t.Right}}</p></div>
+<div class="zone-actions">
+{{range $side := (split "left right")}}<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/tracklimit"><input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}"><input type="hidden" name="side" value="{{$side}}"><button type="submit">Set {{$side}} limit here</button></form>{{end}}
+<form class="control" method="post" action="/cameras/{{$.Camera.Name}}/tracklimit"><input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}"><input type="hidden" name="side" value="full"><button type="submit" class="linkish">Full range</button></form>
+</div>
+</section>
+{{end}}
+
+{{define "privacymode"}}
+{{$v := .V}}{{$ := .P}}
+<section>
+<div class="sec-head"><h2>Privacy mode</h2><span class="sec-where">on camera</span></div>
+<p class="hint">Turns the camera's video, sound and controls off until you turn it back on. reostream checks every 15 seconds and picks the stream back up when it ends; set hold_picture on the camera to keep showing the last picture meanwhile.</p>
+<div class="setting">
+<p><span class="tier tier-interruption" title="Stops the stream"></span>Privacy mode</p>
+<form class="control autosave" method="post" action="/cameras/{{$.Camera.Name}}/privacymode" onsubmit="return confirm('{{if $v.On}}Turn privacy mode off and resume the camera?{{else}}Turn privacy mode on? The camera stops recording and streaming until you turn it off.{{end}}')">
+<input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
+<input type="hidden" name="value" value="{{if $v.On}}1{{else}}0{{end}}">
+<button type="button" class="switch" aria-pressed="{{if $v.On}}true{{else}}false{{end}}" aria-label="Privacy mode"><span class="knob"></span></button>
+</form>
+</div>
+</section>
 {{end}}

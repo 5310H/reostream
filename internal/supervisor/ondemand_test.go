@@ -213,3 +213,92 @@ func TestFirstPictureIsTakenOnceAndKept(t *testing.T) {
 		t.Fatalf("woke %d times with pictures already kept", n)
 	}
 }
+
+// streamsWoken runs a session until it is cancelled, recording which
+// stream woke and whether any session is in progress.
+func streamsWoken(woke chan<- string, awake *int32) Runner {
+	return func(ctx context.Context, cfg stream.Config, h *hub.Hub) error {
+		woke <- cfg.Stream
+		atomic.AddInt32(awake, 1)
+		<-ctx.Done()
+		atomic.AddInt32(awake, -1)
+		return nil
+	}
+}
+
+// Motion the camera reports elsewhere (reoevent's MQTT) wakes its main
+// stream with nobody watching, so the presence stream carries the event
+// live, and it sleeps again once the motion ends.
+func TestBatteryCameraWakesForMotion(t *testing.T) {
+	fastWake(t)
+	woke := make(chan string, 8)
+	var awake int32
+	s := New([]config.Camera{battery}, streamsWoken(woke, &awake))
+	start(t, s)
+
+	if !s.Motion("porch", true) {
+		t.Fatal("Motion did not find the battery camera")
+	}
+	select {
+	case st := <-woke:
+		if st != "main" {
+			t.Fatalf("motion woke %s, want main", st)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("motion did not wake the camera")
+	}
+	s.Motion("porch", false)
+	waitFor(t, func() bool { return atomic.LoadInt32(&awake) == 0 })
+	select {
+	case st := <-woke:
+		t.Fatalf("woke %s again after the motion ended", st)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// Motion that never reports its end still lets the camera sleep.
+func TestBatteryMotionWithNoEndStillSleeps(t *testing.T) {
+	fastWake(t)
+	hold := motionHold
+	motionHold = 150 * time.Millisecond
+	t.Cleanup(func() { motionHold = hold })
+	woke := make(chan string, 8)
+	var awake int32
+	s := New([]config.Camera{battery}, streamsWoken(woke, &awake))
+	start(t, s)
+
+	s.Motion("porch", true)
+	<-woke
+	waitFor(t, func() bool { return atomic.LoadInt32(&awake) == 0 })
+}
+
+func TestMotionIgnoresAWiredCamera(t *testing.T) {
+	s := New([]config.Camera{{Name: "gate", Address: "192.0.2.1", Streams: []string{"main"}}}, counting(new(int32), new(int32)))
+	if s.Motion("gate", true) {
+		t.Fatal("Motion claimed a wired camera, which is never asleep")
+	}
+	if s.Motion("nope", true) {
+		t.Fatal("Motion claimed a camera that does not exist")
+	}
+}
+
+// always_on: a battery camera on constant power wakes with nobody
+// watching and stays awake past the session limit.
+func TestBatteryCameraAlwaysOnStaysAwake(t *testing.T) {
+	fastWake(t)
+	var wakes, awake int32
+	cam := battery
+	cam.AlwaysOn = true
+	s := New([]config.Camera{cam}, counting(&wakes, &awake))
+	start(t, s)
+
+	waitFor(t, func() bool { return atomic.LoadInt32(&awake) == 1 })
+	time.Sleep(3 * wakeMax)
+	if atomic.LoadInt32(&awake) != 1 {
+		t.Fatal("always-on camera went to sleep")
+	}
+	// sub and main each hold one session.
+	if n := atomic.LoadInt32(&wakes); n != 2 {
+		t.Fatalf("woke %d times; want one session per stream", n)
+	}
+}

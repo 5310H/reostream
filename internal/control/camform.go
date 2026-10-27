@@ -100,6 +100,13 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 	// success. Refuse it with a message that says what to do.
 	// A battery camera (a UID) is the exception: with no streams reostream
 	// only reaches it on demand and never holds it awake.
+	// The form has no uid field, so an edit of a battery camera arrives
+	// with none: take it from the camera being edited before judging.
+	if cam.UID == "" {
+		if existing, ok := cameraNamed(cfg, cam.Name); ok {
+			cam.UID = existing.UID
+		}
+	}
 	if len(cam.Streams) == 0 && cam.UID == "" {
 		return fmt.Errorf("pick at least one stream to pull (main, sub or extern): a camera with none set up records nothing")
 	}
@@ -115,6 +122,11 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		// has. Dropping it would quietly repoint a hub camera at channel 0,
 		// which is another camera.
 		cam.Channel = existing.Channel
+		// Nor has it fields for these, so an edit keeps them too: saving
+		// the form used to drop a battery camera's motion_topic.
+		cam.HoldPicture = existing.HoldPicture
+		cam.MotionTopic = existing.MotionTopic
+		cam.AlwaysOn = existing.AlwaysOn
 		if cam.UID == "" {
 			cam.UID = existing.UID
 		}
@@ -187,7 +199,7 @@ type camerasPage struct {
 func (s *Server) camerasPage(ctx context.Context) camerasPage {
 	page := camerasPage{
 		Title:      "Cameras",
-		AllStreams: []string{"main", "sub", "extern", "zoom"},
+		AllStreams: []string{"main", "sub", "extern", "zoom", "zoom_sub"},
 		Unchanged:  passwordUnchanged,
 	}
 	// LoadRaw, not Load: this page renders the config's own text back into
@@ -215,8 +227,8 @@ func (s *Server) camerasPage(ctx context.Context) camerasPage {
 
 // availableStreams is the streams a camera can be set to pull. Main and
 // sub every camera has; extern unless the camera says it has none; zoom
-// only when its RTSP serves one; a battery camera main and sub only. A
-// stream already set always stays, so it can be turned off.
+// and zoom_sub only when the camera has a zoom lens; a battery camera main
+// and sub only. A stream already set always stays, so it can be turned off.
 func (s *Server) availableStreams(ctx context.Context, raw config.Camera) []string {
 	have := map[string]bool{"main": true, "sub": true}
 	if raw.UID == "" {
@@ -226,13 +238,14 @@ func (s *Server) availableStreams(ctx context.Context, raw config.Camera) []stri
 				have["extern"] = true
 			}
 			have["zoom"] = id.Zoom
+			have["zoom_sub"] = id.Zoom
 		}
 	}
 	for _, st := range raw.Streams {
 		have[st] = true
 	}
 	var out []string
-	for _, st := range []string{"main", "sub", "extern", "zoom"} {
+	for _, st := range []string{"main", "sub", "extern", "zoom", "zoom_sub"} {
 		if have[st] {
 			out = append(out, st)
 		}
@@ -288,6 +301,15 @@ func cameraBlockText(cam config.Camera) string {
 	}
 	writeList("streams", cam.Streams)
 	writeList("rtsp", cam.RTSP)
+	if cam.HoldPicture {
+		b.WriteString("hold_picture = true\n")
+	}
+	if cam.MotionTopic != "" {
+		fmt.Fprintf(&b, "motion_topic = %q\n", cam.MotionTopic)
+	}
+	if cam.AlwaysOn {
+		b.WriteString("always_on = true\n")
+	}
 	return b.String()
 }
 

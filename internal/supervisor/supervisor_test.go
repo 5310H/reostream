@@ -290,3 +290,14 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not met within 1s")
 }
+
+// The page checks a save's camera list on its own; the [events] broker a
+// motion_topic needs is in the rest of the file, already validated there.
+// Every save from the page failed on a config using motion_topic.
+func TestValidateAcceptsAMotionTopicCamera(t *testing.T) {
+	s := New(nil, nil)
+	cams := []config.Camera{{Name: "porch", Address: "192.0.2.10", UID: "95270000TESTUID1", MotionTopic: "reostream/argus/motion"}}
+	if err := s.Validate(cams); err != nil {
+		t.Fatalf("Validate = %v", err)
+	}
+}

@@ -197,3 +197,23 @@ func TestDepacketiserAccountsForAFramePrefix(t *testing.T) {
 		t.Errorf("Skipped = %d, want 0", d.Skipped())
 	}
 }
+
+// A video packet still short of its declared size when the next packet
+// starts was cut off: it is counted lost, not as filler (#17).
+func TestDepacketiserCountsACutVideoPacketAsLost(t *testing.T) {
+	d := NewDepacketiser()
+	pkt := make([]byte, 24+100)
+	copy(pkt, "01dcH264")
+	binary.LittleEndian.PutUint32(pkt[8:], 100)
+	d.Write(pkt[:60], true)
+	if _, ok := d.Next(); ok {
+		t.Fatal("a partial packet came out as a frame")
+	}
+	d.Write([]byte("filler"), true)
+	if d.Lost() != 1 || !d.TakeGap() || d.TakeGap() {
+		t.Fatalf("lost=%d; want 1 and one gap reported once", d.Lost())
+	}
+	if d.Filler() != 0 {
+		t.Fatalf("filler=%d; a cut packet is not filler", d.Filler())
+	}
+}

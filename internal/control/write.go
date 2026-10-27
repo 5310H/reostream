@@ -97,6 +97,12 @@ func pairForSet(id uint32) (baichuan.ConfigPair, bool) {
 // as proven was confirmed on a connection opened after the write, not the
 // one that carried it.
 func (s *Server) writeBlock(ctx context.Context, cam Camera, id uint32, body []byte, verify bool) (result WriteResult, err error) {
+	return s.writeBlockWith(ctx, cam, id, body, verify, nil)
+}
+
+// writeBlockWith is writeBlock for a block whose read takes a request
+// document (blockRequest): the before and after reads send it.
+func (s *Server) writeBlockWith(ctx context.Context, cam Camera, id uint32, body []byte, verify bool, req []byte) (result WriteResult, err error) {
 	// refused is checked before anything else here, not only in the UI
 	// that builds the write form, so it holds even for a route added
 	// later by someone who has not read why these ids are refused.
@@ -148,7 +154,7 @@ func (s *Server) writeBlock(ctx context.Context, cam Camera, id uint32, body []b
 	}()
 
 	readCtx, readCancel := context.WithTimeout(ctx, readTimeout)
-	before, _, err := baichuan.ReadConfig(readCtx, conn, pair.Get)
+	before, _, err := baichuan.ReadConfigWith(readCtx, conn, pair.Get, req)
 	readCancel()
 	if err != nil {
 		return WriteResult{}, fmt.Errorf("control: reading %s before writing for %q: %w", pair.Name, cam.Name, err)
@@ -185,7 +191,7 @@ func (s *Server) writeBlock(ctx context.Context, cam Camera, id uint32, body []b
 	conn = fresh
 
 	readCtx, readCancel = context.WithTimeout(ctx, readTimeout)
-	after, _, readErr := baichuan.ReadConfig(readCtx, conn, pair.Get)
+	after, _, readErr := baichuan.ReadConfigWith(readCtx, conn, pair.Get, req)
 	readCancel()
 	if readErr != nil {
 		result.Detail = fmt.Sprintf("accepted (200), but the read-back on a fresh connection failed: %v. This is not proof the camera changed anything.", readErr)

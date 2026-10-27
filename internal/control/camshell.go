@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,8 @@ type camHead struct {
 	State    string
 	Model    string
 	Firmware string
+	// WiFi is a Wi-Fi camera's signal in dBm (msg 115), 0 when unknown.
+	WiFi int
 	// HasSD is a card in the camera; HasClips shows the Recordings tab
 	// (a card, or clips the camera saved here).
 	HasSD    bool
@@ -57,6 +61,8 @@ type camIdent struct {
 	HasSD    bool
 	Model    string
 	Firmware string
+	// WiFi is a Wi-Fi camera's signal in dBm (msg 115), 0 when unknown.
+	WiFi int
 	// Zoom is a second lens (TrackMix), over Baichuan or the camera's RTSP.
 	Zoom bool
 	at   time.Time
@@ -88,7 +94,12 @@ func (s *Server) identFor(ctx context.Context, cam Camera) camIdent {
 	if ok && time.Since(id.at) < identTTL {
 		return id
 	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	// A battery camera spends part of this waking up.
+	wait := 8 * time.Second
+	if cam.UID != "" {
+		wait = pageDialTimeoutBattery
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	conn, err := s.dial(ctx, cam)
 	if err != nil {
@@ -115,6 +126,26 @@ func (s *Server) identFor(ctx context.Context, cam Camera) camIdent {
 	// card, 0 on a TrackMix without one) or diskNum, which reads 0 for a
 	// moment after a battery camera wakes. The sdcard block is no help: a
 	// battery camera does not answer it at all.
+	// A Wi-Fi camera's signal (msg 115, "<signal>-34</signal>"): weak
+	// Wi-Fi is the usual cause of a Wi-Fi camera's broken frames (#17).
+	// A battery camera is on Wi-Fi too, though the Argus PT Ultra does
+	// not say so in its support block.
+	if cam.UID != "" || (id.Support != nil && id.Support.Support.WiFi != 0) {
+		// A battery camera that has just woken takes a few seconds to
+		// measure its signal.
+		wifiWait := readTimeout
+		if cam.UID != "" {
+			wifiWait = 12 * time.Second
+		}
+		rctx, rcancel := context.WithTimeout(ctx, wifiWait)
+		doc, status, err := baichuan.ReadConfig(rctx, conn, baichuan.MsgIDWifiSignal)
+		rcancel()
+		if err == nil && status == 200 {
+			if v, ok := fieldValue(doc, "WifiSignal/signal"); ok {
+				id.WiFi, _ = strconv.Atoi(strings.TrimSpace(v))
+			}
+		}
+	}
 	id.HasSD = id.Support != nil && (id.Support.Support.DiskNum > 0 || id.Support.Support.Record > 0)
 	if cam.UID == "" && cam.Channel == 0 {
 		zctx, zcancel := context.WithTimeout(ctx, 8*time.Second)
@@ -149,9 +180,10 @@ func settingsCats(sup *baichuan.Support) []struct {
 		group string
 		items [][2]string
 	}{
-		{"Picture", [][2]string{{"image", "Image"}, {"overlay", "Name and timestamp"}}},
+		{"Picture", [][2]string{{"image", "Image"}, {"overlay", "Name and timestamp"}, {"privacy", "Privacy mask"}}},
 		{"Video", video},
 		{"Hardware", hardware},
+		{"Detection", [][2]string{{"detect", "Motion and objects"}, {"smart", "Smart rules"}, {"record", "Recording"}}},
 		{"Alerts", [][2]string{{"clips", "Auto-save motion clips"}, {"ftp", "FTP upload"}, {"email", "Email alerts"}, {"push", "Push notifications"}}},
 		{"System", [][2]string{{"network", "Network services"}, {"time", "Date and time"}, {"remove", "Remove camera"}}},
 		{"Expert", [][2]string{{"raw", "Raw values"}, {"advanced", "Raw documents"}}},
@@ -190,6 +222,7 @@ func (s *Server) camHeadFor(ctx context.Context, cam Camera, tab, cat string) ca
 	// A battery camera records to its card by design, and right after it
 	// wakes its support block can read as having none.
 	h.Model, h.Firmware, h.HasSD = id.Model, id.Firmware, id.HasSD || cam.UID != ""
+	h.WiFi = id.WiFi
 	h.HasClips = h.HasSD || s.hasSavedClips(cam.Name)
 	for _, g := range settingsCats(id.Support) {
 		ng := camNavGroup{Title: g.group}

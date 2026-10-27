@@ -388,7 +388,7 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
 .state-streaming { color: var(--ok); }
 .state-novideo, .state-reconnecting { color: var(--warn); }
 .state-down { color: var(--bad); }
-.state-undetermined, .state-unknown, .state-idle, .state-asleep { color: var(--unknown); }
+.state-undetermined, .state-unknown, .state-idle, .state-asleep, .state-privacy { color: var(--unknown); }
 
 .outcome-confirmed { color: var(--ok); }
 .outcome-accepted { color: var(--warn); }
@@ -1660,3 +1660,43 @@ section > .live-url { width: 100%; grid-template-columns: 1fr auto; }
 
 /* The browser's own time box is white on every theme; match the others. */
 input[type="time"] { background: var(--field); color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 6px 8px; color-scheme: dark; font: inherit; }
+
+/* Weekly schedule grids (schedule.js). */
+.sched-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+.sched-tab { background: var(--raise); color: var(--dim); border: 1px solid var(--edge); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: .85rem; cursor: pointer; }
+.sched-tab[aria-selected="true"] { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+.sched-grid { display: grid; gap: 2px; max-width: 32rem; user-select: none; touch-action: none; }
+.sched-day, .sched-hour { color: var(--muted); font-size: .75rem; text-align: center; align-self: center; }
+.sched-hour { text-align: right; padding-right: 6px; font-variant-numeric: tabular-nums; }
+.sched-cell { height: 14px; min-width: 0; padding: 0; border: 0; border-radius: 2px; background: var(--field); cursor: pointer; }
+.sched-cell[aria-pressed="true"] { background: var(--accent); }
+.sched-cell:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 1px; }
+.sched-actions { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+.sched-save { margin-left: auto; }
+
+/* Detection zone painter (zone.js). */
+.zone-wrap { position: relative; max-width: 40rem; aspect-ratio: 16 / 9; background: var(--field); border-radius: 6px; overflow: hidden; }
+.zone-wrap .cam-video, .zone-wrap .cam-video img, .zone-wrap .cam-video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.zone-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.zone-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; max-width: 40rem; }
+.zone-tool { width: auto; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.zone-save { margin-left: auto; }
+
+/* Privacy mask boxes (mask.js). */
+.mask-wrap { position: relative; max-width: 40rem; aspect-ratio: 16 / 9; background: var(--field); border-radius: 6px; overflow: hidden; }
+.mask-wrap .cam-video, .mask-wrap .cam-video img, .mask-wrap .cam-video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.mask-layer { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
+.mask-box { position: absolute; background: rgba(0, 0, 0, 0.85); outline: 1px solid var(--edge); }
+.mask-box.selected { outline: 2px solid var(--accent); }
+
+/* Smart rule editor (rules.js). */
+form.rule { margin-bottom: 20px; }
+.rule-wrap { position: relative; max-width: 40rem; aspect-ratio: 16 / 9; background: var(--field); border-radius: 6px; overflow: hidden; }
+.rule-wrap .cam-video, .rule-wrap .cam-video img, .rule-wrap .cam-video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.rule-svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+.rule-shape { fill: rgba(80, 150, 255, 0.18); stroke: var(--accent); stroke-width: 6; vector-effect: non-scaling-stroke; }
+polyline.rule-shape { fill: none; }
+.rule-pt { fill: var(--accent); stroke: var(--ink); stroke-width: 4; cursor: grab; vector-effect: non-scaling-stroke; }
+.rule-fields { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; max-width: 40rem; }
+.rule-fields input[type="number"] { width: 5rem; }
+.rule-types { display: inline-flex; gap: 10px; }

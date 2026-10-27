@@ -130,6 +130,24 @@ func TestUnknownStreamNameIsRejected(t *testing.T) {
 	}
 }
 
+func TestZoomSubIsAStreamName(t *testing.T) {
+	cfg := &Config{Cameras: []Camera{{Name: "a", Address: "192.0.2.1", Streams: []string{"main", "zoom", "zoom_sub"}}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("zoom_sub rejected: %v", err)
+	}
+}
+
+// A motion topic is read from the [events] broker, so it needs one.
+func TestMotionTopicNeedsAnEventsBroker(t *testing.T) {
+	cam := Camera{Name: "a", Address: "192.0.2.1", UID: "95270000TESTUID1", MotionTopic: "reostream/argus/motion"}
+	if err := (&Config{Cameras: []Camera{cam}}).Validate(); err == nil {
+		t.Fatal("motion_topic accepted with no [events] mqtt")
+	}
+	if err := (&Config{Cameras: []Camera{cam}, Events: &EventsConfig{MQTT: "192.0.2.5:1883"}}).Validate(); err != nil {
+		t.Fatalf("motion_topic with a broker rejected: %v", err)
+	}
+}
+
 func TestLoadRTSPSection(t *testing.T) {
 	cfg, err := Load("testdata/rtsp.toml")
 	if err != nil {
@@ -356,5 +374,12 @@ func TestCameraAddressAndUsernameComeFromTheEnvironment(t *testing.T) {
 	os.Unsetenv("CAM_ADDR")
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "address") {
 		t.Fatalf("unset address variable: %v", err)
+	}
+}
+
+func TestAlwaysOnNeedsAUID(t *testing.T) {
+	c := &Config{Cameras: []Camera{{Name: "a", Address: "1.1.1.1", Streams: []string{"main"}, AlwaysOn: true}}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "always_on") {
+		t.Fatalf("Validate = %v, want an always_on refusal", err)
 	}
 }
