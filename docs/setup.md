@@ -324,28 +324,17 @@ cameras:
         days: 7
 ```
 
-#### Waking for motion
+#### Motion
 
-A battery camera reports its motion to Reolink's cloud, not to reostream. `reoevent`
-hears those reports on the router the camera talks through and publishes them to MQTT as
-`ON` / `OFF`. Give the camera that topic and reostream wakes it for the length of the
-motion, so the presence stream (and Frigate's recording of it) carries the event live
-instead of the last picture, then saves the new picture and lets it sleep. The motion is
-also relayed like a wired camera's alerts (`<prefix>/<camera>/motion`, and a Frigate
-event with `frigate_motion = true`). It needs the `[events]` broker:
+Turn on **Auto-save motion clips** on the camera's page. The camera then uploads each motion
+clip to reostream, which saves it on your disk, plays it into the presence stream so Frigate
+records the event, and reports it like a wired camera's alerts (`<prefix>/<camera>/motion`,
+and a Frigate event with `frigate_motion = true`). A clip arrives some seconds after the
+motion starts, once the camera has finished recording it.
 
-```toml
-[events]
-mqtt = "192.0.2.5:1883"
-
-[[camera]]
-name = "backyard"
-uid = "9527000N031XXXXX"
-motion_topic = "reostream/argus/motion"   # reoevent -name argus
-```
-
-Each motion costs one wake (a few seconds to the first frame, then until about 10 s after
-the motion ends, at most 5 minutes), on top of the camera's own recording.
+Coming soon: live motion. The camera's low-power chip already says when it wakes for motion,
+without being woken to ask, so reostream will wake the stream the moment motion starts, with
+no extra setup.
 
 #### Always on (constant power only)
 
