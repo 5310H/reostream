@@ -213,6 +213,6 @@ func TestRunToleratesASlowButHealthyStream(t *testing.T) {
 			t.Errorf("Run returned %v after cancel, want context.Canceled", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Run did not return after the context was cancelled")
+		t.Fatal("Run did not return after the context was canceled")
 	}
 }

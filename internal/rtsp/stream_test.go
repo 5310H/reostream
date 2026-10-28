@@ -47,13 +47,13 @@ func TestRTPTimestampDoesNotOverflowIn32Bits(t *testing.T) {
 	}
 }
 
-// Packetising for nobody is the cost this design exists to avoid: the HTTP
+// Packetizing for nobody is the cost this design exists to avoid: the HTTP
 // path muxes continuously so a new client can join instantly, and RTSP does
 // not need that because the camera connection is held either way.
-func TestNoPacketisationWithoutReaders(t *testing.T) {
+func TestNoPacketizationWithoutReaders(t *testing.T) {
 	s := &Stream{}
 	s.Frame(baichuan.Frame{Kind: baichuan.FrameIFrame, Codec: "h265"})
-	if s.packetised != 0 {
-		t.Errorf("packetised %d times with no readers", s.packetised)
+	if s.packetized != 0 {
+		t.Errorf("packetized %d times with no readers", s.packetized)
 	}
 }

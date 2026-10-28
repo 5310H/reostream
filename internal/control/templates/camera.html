@@ -295,13 +295,16 @@
 </form>
 </section>
 {{end}}
-{{if .Siren.Have}}
+{{$volume := and .Siren.Have (not (.Shows "Speaker"))}}
+{{$alarm := and .Siren.Have .Siren.HaveAlarm (not (.Shows "Siren on detection"))}}
+{{if or $volume $alarm}}
 <section id="sound">
 <div class="sec-head">
 <h2>Sound</h2>
 </div>
 {{if .Siren.Err}}<p class="outcome-refused">{{.Siren.Err}}</p>{{end}}
 <form class="control autosave" method="post" action="/cameras/{{.Camera.Name}}/siren">
+{{if $volume}}
 <div class="setting">
 <p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span>Speaker volume{{template "info" "Also how loud talk comes out."}}</p>
 <div class="control">
@@ -317,7 +320,8 @@
 </span>
 </div>
 </div>
-{{if .Siren.HaveAlarm}}
+{{end}}
+{{if $alarm}}
 <div class="setting">
 <p><span class="tier tier-instant" title="Saves instantly, nothing stops"></span>Sound the alarm on detection{{template "info" "Uses the schedule set in the Reolink app."}}</p>
 <div class="control">
@@ -332,7 +336,7 @@
 </section>
 {{end}}
 
-{{if not .Siren.Have}}<section><div class="sec-head"><h2>Sound</h2></div><p class="hint">No speaker settings on this camera.</p></section>{{end}}
+{{if and (not .Siren.Have) (not (.Shows "Speaker"))}}<section><div class="sec-head"><h2>Sound</h2></div><p class="hint">No speaker settings on this camera.</p></section>{{end}}
 {{end}}
 
 {{if eq .Cat "network"}}
@@ -591,8 +595,8 @@ function netConfirm(f) {
      is the only input submitted, and is not clamped to the track. */}}
 <span class="slider">
 <input type="range" class="slider-range" aria-label="{{.Label}} slider"
-  min="{{$.SliderMin $current}}" max="{{$.SliderMax $current}}" step="1" value="{{$current}}">
-<input type="number" class="slider-box" name="value" value="{{$current}}">
+  min="{{if .Max}}{{.Min}}{{else}}{{$.SliderMin $current}}{{end}}" max="{{if .Max}}{{.Max}}{{else}}{{$.SliderMax $current}}{{end}}" step="1" value="{{$current}}">
+<input type="number" class="slider-box" name="value" value="{{$current}}"{{if .Max}} min="{{.Min}}" max="{{.Max}}"{{end}}>
 </span>
 
 {{else if eq .Kind "reading"}}
@@ -704,7 +708,7 @@ window.addEventListener("load", function () {
      the picture to add one; tap one to select it, then Remove. */}}
 <section class="mask">
 <div class="sec-head"><h2>Privacy mask</h2><span class="sec-where">on camera</span></div>
-<p class="hint">Black out up to {{$m.Max}} areas, like a neighbour's window. They are blacked out in every stream and recording, including Frigate's.</p>
+<p class="hint">Black out up to {{$m.Max}} areas, like a neighbor's window. They are blacked out in every stream and recording, including Frigate's.</p>
 <form class="control" method="post" action="/cameras/{{$.Camera.Name}}/mask">
 <input type="hidden" name="return" value="/cameras/{{$.Camera.Name}}/settings/{{$.Cat}}">
 <input type="hidden" name="rects" value="{{$m.Rects}}">

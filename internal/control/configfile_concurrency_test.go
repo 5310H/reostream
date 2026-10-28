@@ -17,7 +17,7 @@ import (
 
 // orderingReloader records every camera list it is asked to apply, in the
 // order Reload actually ran, and can be told to stall one specific call so a
-// test can force two saves to overlap. Without configMu serialising
+// test can force two saves to overlap. Without configMu serializing
 // writeAndApply, a save whose apply is slow can still have already written
 // its file before a second, faster save writes and applies its own list, and
 // then the slow save's apply lands last: the file on disk ends up describing

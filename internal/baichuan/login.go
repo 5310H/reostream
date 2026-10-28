@@ -247,7 +247,7 @@ type abilityQueryBody struct {
 	Token    string   `xml:"token"`
 }
 
-// abilityModules is every module the cameras here recognise. Asking for all
+// abilityModules is every module the cameras here recognize. Asking for all
 // of them costs one round trip and avoids a caller having to know the names.
 const abilityModules = "system, network, alarm, record, video, image"
 

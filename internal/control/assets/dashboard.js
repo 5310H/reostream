@@ -1,5 +1,5 @@
-// Dashboard behaviour. Split out of dashboard.html so the template is
-// markup and this is behaviour; nothing here is new logic, it is the
+// Dashboard behavior. Split out of dashboard.html so the template is
+// markup and this is behavior; nothing here is new logic, it is the
 // script that already lived at the bottom of that page plus the keyframe
 // swap.
 //
@@ -47,13 +47,27 @@
   // the frame knows: a fisheye changes its own frame size when its Image
   // Layout changes (2560x2560 in one mode, 3200x3200 in another), and no
   // stored value tracks that.
+  //
+  // Fleet is the exception: there every tile is 16:9 so the cards line up
+  // in rows, whatever each camera's shape. A frame near 16:9 fills its
+  // tile, trimming at most fleetMaxCrop off the edges; one further off (a
+  // panoramic, a fisheye) is drawn whole on black instead, since filling
+  // would cut half of it away. Nothing is ever stretched.
+  var fleetMaxCrop = 0.15;
   function shapeTile(t, w, h) {
     if (!w || !h || !t.container) return;
     var ratio = w / h;
+    if (t.container.closest('.fleet')) {
+      var off = ratio / (16 / 9);
+      var crop = off > 1 ? 1 - 1 / off : 1 - off;
+      t.container.classList.toggle('fit-cover', crop <= fleetMaxCrop);
+      t.container.classList.toggle('letterbox', crop > fleetMaxCrop);
+      return;
+    }
     // Guard rails, not correctness: a camera far outside this range would
     // make one tile tall enough to push the rest of the fleet off screen,
     // or thin enough to be unreadable. Both clamp to a letterbox, which is
-    // the old behaviour and is the right fallback.
+    // the old behavior and is the right fallback.
     if (ratio < 0.5) ratio = 0.5;
     if (ratio > 4) ratio = 4;
     t.container.style.aspectRatio = ratio.toFixed(4);

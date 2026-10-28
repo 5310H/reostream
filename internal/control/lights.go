@@ -57,7 +57,7 @@ var floodlightOptions = []floodlightOption{
 }
 
 // floodlightOptionByValue finds the option a form posted, refusing an
-// unrecognised value rather than passing it through to the camera.
+// unrecognized value rather than passing it through to the camera.
 func floodlightOptionByValue(value string) (floodlightOption, bool) {
 	for _, o := range floodlightOptions {
 		if o.Value == value {
@@ -117,8 +117,8 @@ func (s *Server) cgiDial(cam Camera) (*cgi.Client, error) {
 // GetWhiteLed intermittently answers "please login first" on a connection
 // that logged in seconds earlier; c already logs in again and retries once,
 // so nothing here adds a second retry layer on top of it.
-func readFloodlightDoc(ctx context.Context, c *cgi.Client) (map[string]any, error) {
-	value, _, _, err := c.Get(ctx, "GetWhiteLed", 0)
+func readFloodlightDoc(ctx context.Context, c *cgi.Client, channel int) (map[string]any, error) {
+	value, _, _, err := c.Get(ctx, "GetWhiteLed", channel)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +149,8 @@ func floodlightModeState(doc map[string]any) (mode, state int) {
 // readFloodlight reads the floodlight's current mode and state over CGI,
 // for display: serveSettings only ever shows floodlightState(mode, state),
 // never the raw document, so it keeps this narrow entry point.
-func readFloodlight(ctx context.Context, c *cgi.Client) (mode, state int, err error) {
-	doc, err := readFloodlightDoc(ctx, c)
+func readFloodlight(ctx context.Context, c *cgi.Client, channel int) (mode, state int, err error) {
+	doc, err := readFloodlightDoc(ctx, c, channel)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -175,14 +175,14 @@ func readFloodlight(ctx context.Context, c *cgi.Client) (mode, state int, err er
 // supplies its own schema, including bright and LightingSchedule, and a
 // composed document drops both. That is what made the "schedule" option
 // (mode 3) send no schedule at all before this changed.
-func setFloodlight(ctx context.Context, c *cgi.Client, mode, state int) error {
-	cur, err := readFloodlightDoc(ctx, c)
+func setFloodlight(ctx context.Context, c *cgi.Client, channel, mode, state int) error {
+	cur, err := readFloodlightDoc(ctx, c, channel)
 	if err != nil {
 		return err
 	}
 	cur["mode"] = mode
 	cur["state"] = state
-	cur["channel"] = 0
+	cur["channel"] = channel
 	return c.Set(ctx, "SetWhiteLed", map[string]any{"WhiteLed": cur})
 }
 
@@ -232,15 +232,15 @@ func (s *Server) serveApplyFloodlight(w http.ResponseWriter, r *http.Request) {
 	// Best effort: a failed pre-read is not a reason to refuse the write
 	// itself, only to leave Before blank.
 	var before string
-	if beforeMode, beforeState, readErr := readFloodlight(ctx, c); readErr == nil {
+	if beforeMode, beforeState, readErr := readFloodlight(ctx, c, cam.Channel); readErr == nil {
 		before = floodlightState(beforeMode, beforeState)
 	}
 
 	result := WriteResult{Before: []byte(before)}
-	if err := setFloodlight(ctx, c, opt.Mode, opt.State); err != nil {
+	if err := setFloodlight(ctx, c, cam.Channel, opt.Mode, opt.State); err != nil {
 		result.Outcome = "refused"
 		result.Detail = err.Error()
-	} else if mode, state, readErr := readFloodlight(ctx, c); readErr != nil {
+	} else if mode, state, readErr := readFloodlight(ctx, c, cam.Channel); readErr != nil {
 		result.Outcome = "accepted"
 		result.Detail = fmt.Sprintf("the camera took the command, but reading it back failed: %v. This is not proof the camera changed anything.", readErr)
 	} else {

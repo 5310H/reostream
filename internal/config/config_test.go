@@ -110,7 +110,7 @@ func TestTwoCamerasSharingAnAddressOnDisjointStreamsAreAllowed(t *testing.T) {
 	}
 }
 
-func TestSharedAddressCheckNormalisesThePort(t *testing.T) {
+func TestSharedAddressCheckNormalizesThePort(t *testing.T) {
 	// "192.0.2.1" and "192.0.2.1:9000" name the same camera on the wire
 	// (see NormalizeAddr / baichuan.Dial's own default), so this must be
 	// caught the same as an exact string match would be.
@@ -119,7 +119,7 @@ func TestSharedAddressCheckNormalisesThePort(t *testing.T) {
 		{Name: "front-again", Address: "192.0.2.1:9000", Streams: []string{"main"}},
 	}}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected the default-port form to be recognised as the same address")
+		t.Fatal("expected the default-port form to be recognized as the same address")
 	}
 }
 

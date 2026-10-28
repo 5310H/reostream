@@ -56,7 +56,7 @@ func TestRealH264NALHeadersAreAccepted(t *testing.T) {
 	}
 }
 
-// End to end through the depacketiser: a frame whose prefix carries the
+// End to end through the depacketizer: a frame whose prefix carries the
 // captured junk must still yield the real picture, whole.
 func TestFrameWithCapturedJunkInPrefixYieldsTheWholePicture(t *testing.T) {
 	picture := append([]byte{0, 0, 0, 1, 0x41, 0x9a}, bytes.Repeat([]byte{0x88}, 64)...)
@@ -71,7 +71,7 @@ func TestFrameWithCapturedJunkInPrefixYieldsTheWholePicture(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture)))
 		buf = append(buf, body...)
 
-		var d Depacketiser
+		var d Depacketizer
 		d.Write(buf, true)
 		f, ok := d.Next()
 		if !ok {
@@ -109,7 +109,7 @@ func TestAKeyframePrefixIsNotEndedByASliceHeader(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture)))
 	buf = append(buf, body...)
 
-	var d Depacketiser
+	var d Depacketizer
 	d.Write(buf, true)
 	f, ok := d.Next()
 	if !ok {
@@ -132,7 +132,7 @@ func TestAKeyframeOpeningWithAnIDRStillParses(t *testing.T) {
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture)))
 	buf = append(buf, picture...)
 
-	var d Depacketiser
+	var d Depacketizer
 	d.Write(buf, true)
 	f, ok := d.Next()
 	if !ok {

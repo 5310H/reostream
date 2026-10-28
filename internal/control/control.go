@@ -205,7 +205,7 @@ type Server struct {
 	// a claim. It is generated once in New, printed to the log by main,
 	// and never written to disk -- a restart while the install is still
 	// unclaimed makes a new one. A successful claim clears it: it
-	// authorises exactly one claim. It lives under authMu with the rest of
+	// authorizes exactly one claim. It lives under authMu with the rest of
 	// the claim state because a claim writes it from one request while
 	// other requests are reading it.
 	authMu       sync.RWMutex
@@ -223,7 +223,7 @@ type Server struct {
 	// accepted; serveLogin records what each one did. The password carries
 	// the security instead: see claimPasswordMinLength.
 
-	// configMu serialises writeAndApply end to end: reading the previous
+	// configMu serializes writeAndApply end to end: reading the previous
 	// config, validating, writing the file, and reloading the fleet all
 	// happen while it is held. The write and the apply must be atomic
 	// together, not just each internally consistent, or two concurrent
@@ -231,7 +231,7 @@ type Server struct {
 	// and then apply in the opposite order, leaving the file on disk and
 	// the running fleet describing two different fleets with neither
 	// operator told anything went wrong. Supervisor.Reload already
-	// serialises itself with its own reloadMu, but that only protects the
+	// serializes itself with its own reloadMu, but that only protects the
 	// apply step in isolation; it does nothing to stop the write from
 	// happening out of order with it.
 	//
@@ -264,7 +264,7 @@ type Server struct {
 	flashes  map[string]flashEntry
 	flashNow func() time.Time
 
-	// inFlightMu and inFlightProbes serialise setup probes against each
+	// inFlightMu and inFlightProbes serialize setup probes against each
 	// other, not just against the daemon's own config: probeGuarded's
 	// config-membership check closes the window against an already
 	// configured camera, but nothing else in-process stops two browser
@@ -291,7 +291,18 @@ type Server struct {
 
 	// silentMu guards silentUntil: when a camera last timed out on a dial
 	// from this page, keyed by address and uid. See dial.
-	silentMu    sync.Mutex
+	silentMu sync.Mutex
+
+	// recorders remembers which addresses answered as an NVR or Home Hub
+	// rather than a camera (DeviceInfo type), so channel 0 behind one is
+	// still told apart from a camera on its own. See behindRecorder.
+	// ptzHeld is each camera's kept-open pan/tilt connection; see
+	// ptzhold.go.
+	ptzMu   sync.Mutex
+	ptzHeld map[string]*ptzHold
+
+	recorderMu  sync.Mutex
+	recorders   map[string]bool
 	silentUntil map[string]time.Time
 }
 
@@ -304,8 +315,16 @@ type Server struct {
 // list rather than failing the whole render.
 func templateFuncs(opts Options) template.FuncMap {
 	return template.FuncMap{
+		// recorderCamName suggests a reostream name for a camera on an NVR
+		// channel: its own name ("Track mix" -> track_mix), or ch<N>.
+		"recorderCamName": func(name string, ch int) string {
+			if n := slugName(name); n != "" {
+				return n
+			}
+			return fmt.Sprintf("ch%d", ch)
+		},
 		// railEntry, not Camera: Camera carries the password, and the rail
-		// needs only a name and a colour.
+		// needs only a name and a color.
 		"fleet": func() []railEntry {
 			cams, err := loadFleet(opts.ConfigPath)
 			if err != nil {
@@ -372,6 +391,11 @@ func New(opts Options) (*Server, error) {
 		go srv.clockScheduler(context.Background())
 		go srv.syncRelay()
 	}
+	// A battery camera's motion, seen from its waking, goes out with the
+	// rest of the alerts.
+	if h, ok := opts.Supervisor.(motionHooker); ok {
+		h.SetMotionHook(relay.batteryMotion)
+	}
 	return srv, nil
 }
 
@@ -431,6 +455,7 @@ var routePatterns = []string{
 	"POST /login",
 	"GET /{$}",
 	"GET /wall",
+	"POST /fleet/order",
 	"GET /logs",
 	"GET /logs/history",
 	"GET /logs/stream",
@@ -444,6 +469,7 @@ var routePatterns = []string{
 	"POST /cameras/{name}/remove",
 	"GET /cameras/{name}",
 	"POST /cameras/{name}/settings",
+	"POST /cameras/{name}/rename",
 	"POST /cameras/{name}/schedule",
 	"POST /cameras/{name}/zone",
 	"POST /cameras/{name}/mask",
@@ -528,6 +554,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.serveLogin)
 	mux.Handle("GET /{$}", s.wrap(http.HandlerFunc(s.serveDashboard)))
 	mux.Handle("GET /wall", s.wrap(http.HandlerFunc(s.serveWall)))
+	mux.Handle("POST /fleet/order", s.wrap(http.HandlerFunc(s.serveFleetOrder)))
 	mux.Handle("GET /settings", s.wrap(http.HandlerFunc(s.serveSettingsIndex)))
 	mux.Handle("GET /settings/about", s.wrap(http.HandlerFunc(s.serveAbout)))
 	mux.Handle("GET /settings/nvr", s.wrap(http.HandlerFunc(s.serveNVR)))
@@ -548,6 +575,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /cameras/{name}/remove", s.wrap(http.HandlerFunc(s.serveRemoveCamera)))
 	mux.Handle("GET /cameras/{name}", s.wrap(http.HandlerFunc(s.serveCamera)))
 	mux.Handle("POST /cameras/{name}/settings", s.wrap(http.HandlerFunc(s.serveApplySetting)))
+	mux.Handle("POST /cameras/{name}/rename", s.wrap(http.HandlerFunc(s.serveRename)))
 	mux.Handle("POST /cameras/{name}/schedule", s.wrap(http.HandlerFunc(s.serveSchedule)))
 	mux.Handle("POST /cameras/{name}/zone", s.wrap(http.HandlerFunc(s.serveZone)))
 	mux.Handle("POST /cameras/{name}/mask", s.wrap(http.HandlerFunc(s.serveMask)))
@@ -624,7 +652,7 @@ func (s *Server) Handler() http.Handler {
 	// which is the same exemption arriving one layer too late.)
 	//
 	// What is under assets/ is the whole argument: a stylesheet, the
-	// vendored mpegts.js and its two licence files, and a README about
+	// vendored mpegts.js and its two license files, and a README about
 	// where that copy came from. No secret, no camera name, no config,
 	// nothing derived from any of them -- they are the same bytes for
 	// every install, and they are already in the published image. Any

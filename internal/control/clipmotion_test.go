@@ -86,3 +86,29 @@ func TestMotionClientIDsDiffer(t *testing.T) {
 		t.Fatalf("two subscribers got the same client id %q", a)
 	}
 }
+
+// Motion from a battery camera waking on its own goes out like any other
+// camera's, and nowhere while the relay is off.
+func TestBatteryWakeMotionIsRelayed(t *testing.T) {
+	var mu sync.Mutex
+	var got []alarms.Change
+	r := &eventRelay{handle: func(c alarms.Change) { mu.Lock(); got = append(got, c); mu.Unlock() }}
+	r.batteryMotion("argus", true)
+	r.batteryMotion("argus", false)
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		n := len(got)
+		mu.Unlock()
+		if n == 2 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 || got[0].Camera != "argus" || got[0].Kind != "motion" || got[0].On == got[1].On {
+		t.Fatalf("got %+v, want argus motion ON and OFF", got)
+	}
+	(&eventRelay{}).batteryMotion("argus", true) // relay off: must not panic
+}

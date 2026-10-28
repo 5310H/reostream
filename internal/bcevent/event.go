@@ -34,7 +34,7 @@ type Battery struct {
 
 // Report is a decoded event. Fields outside the one that matched Kind are
 // left at their zero value; Raw holds the original JSON for anything not
-// modelled here.
+// modeled here.
 type Report struct {
 	Event int             `json:"event"`
 	Kind  Kind            `json:"-"`

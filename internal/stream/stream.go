@@ -1,5 +1,5 @@
-// Package stream joins one camera to one hub: dial, depacketise, mux,
-// publish, on repeat until the context is cancelled or something fails.
+// Package stream joins one camera to one hub: dial, depacketize, mux,
+// publish, on repeat until the context is canceled or something fails.
 package stream
 
 import (
@@ -104,6 +104,10 @@ type Config struct {
 	// HoldPicture is the camera's hold_picture setting (see config.Camera).
 	HoldPicture bool
 
+	// Rotate is the camera's rotate setting (see config.Camera); nil
+	// leaves it to what the camera says at login.
+	Rotate *int
+
 	// IdleTimeout overrides baichuan.DefaultIdleTimeout. A battery camera
 	// that is awake sends within a couple of seconds, so one that does not
 	// is holding a session and is quicker to retry than to wait out.
@@ -144,12 +148,12 @@ func streamKind(name string) (string, bool) {
 }
 
 // Run dials cfg's camera, starts its video stream, and publishes muxed
-// MPEG-TS to h until ctx is cancelled or an error occurs. It never retries:
+// MPEG-TS to h until ctx is canceled or an error occurs. It never retries:
 // retry and backoff belong to the supervisor that runs many of these, since
 // a runner that retries internally would hold the camera's one connection
 // for that stream and block its own replacement from ever connecting.
 //
-// Run returns promptly on an already cancelled context without dialling, so
+// Run returns promptly on an already canceled context without dialling, so
 // a supervisor can cancel a Config before Run has had a chance to start it.
 func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	if err := ctx.Err(); err != nil {
@@ -206,6 +210,13 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 		}
 	}()
 
+	// A camera that encodes its picture sideways says so at login; see
+	// rotate.go. Nothing is logged for the flag itself: an upright camera
+	// sends it too, so only a picture that is actually turned is logged.
+	rotate, rotateFromCamera, _ := rotationFor(cfg, conn.DeviceInfo())
+	var infoW, infoH int
+	rotateLogged := false
+
 	// Ask before StartVideo, while nothing else is arriving: the answer has
 	// to be in before the first keyframe fixes the sink's description. A
 	// camera whose Support block cannot be read is left as it was rather
@@ -248,9 +259,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 	}
 	lastMedia := time.Now()
 
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	// waitKey drops P frames after a lost video packet until a keyframe
-	// arrives (see Depacketiser.TakeGap).
+	// arrives (see Depacketizer.TakeGap).
 	waitKey := false
 	var mux *ts.Muxer
 	var reportedDroppedAudio int
@@ -328,7 +339,7 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 							// anyone noticing for days. An AAC frame is
 							// carried; anything else, ADPCM in particular,
 							// is dropped and counted (see DroppedAudio
-							// below), never relabelled.
+							// below), never relabeled.
 							nm, err := ts.NewMuxerWithAudio(f.Codec, "aac")
 							if err != nil {
 								return fmt.Errorf("stream: %s: %w", cfg.Name, err)
@@ -345,6 +356,18 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 						// subscriber joining mid GOP wait for its own first
 						// legal frame instead of a decoder choking on
 						// slices with no parameter sets (see hub.PublishKey).
+						// Only a stream that really is taller than wide
+						// is turned when the camera asked: its other
+						// resolutions and the sub stream come out upright.
+						// A rotate setting applies as written.
+						if rotate != 0 && f.Kind == baichuan.FrameIFrame && isHEVC(f.Codec) &&
+							(!rotateFromCamera || infoH > infoW) {
+							f.Data = withOrientation(f.Data, rotate)
+							if !rotateLogged {
+								log.Printf("stream: %s/%s: marking the picture to be shown turned %d degrees anticlockwise", cfg.Name, cfg.Stream, rotate)
+								rotateLogged = true
+							}
+						}
 						// Before muxing, so an RTSP output receives the
 						// frame rather than TS bytes.
 						if cfg.Sink != nil {
@@ -362,6 +385,9 @@ func Run(ctx context.Context, cfg Config, h *hub.Hub) (err error) {
 						}
 
 					case baichuan.FrameInfo:
+						if f.Width > 0 && f.Height > 0 {
+							infoW, infoH = f.Width, f.Height
+						}
 						// Carries the picture size, which the muxer does not
 						// need (the parameter sets say it) but a sink that
 						// configures a hardware decoder before it has parsed

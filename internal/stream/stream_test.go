@@ -12,10 +12,10 @@ import (
 	"github.com/VoltTech21/reostream/internal/hub"
 )
 
-func TestRunStopsWhenTheContextIsCancelled(t *testing.T) {
+func TestRunStopsWhenTheContextIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	// An already cancelled context must return promptly rather than dialling.
+	// An already canceled context must return promptly rather than dialling.
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, Config{Name: "x", Address: "192.0.2.1:9000", Stream: "main"}, nil)
@@ -23,10 +23,10 @@ func TestRunStopsWhenTheContextIsCancelled(t *testing.T) {
 	select {
 	case err := <-done:
 		if err == nil {
-			t.Fatal("expected an error from a cancelled context")
+			t.Fatal("expected an error from a canceled context")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Run ignored a cancelled context")
+		t.Fatal("Run ignored a canceled context")
 	}
 }
 

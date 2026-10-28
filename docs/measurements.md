@@ -95,7 +95,7 @@ a climbing figure would mean the fan-out was buffering for a slow reader instead
 dropping it.
 
 Five further cameras were checked with the protocol probe alone, 6 second captures, and all
-five returned an identical 59 frames with 6 keyframes, H.264, and no resynchronisation.
+five returned an identical 59 frames with 6 keyframes, H.264, and no resynchronization.
 
 ### Decode errors at connect, and why
 
@@ -122,7 +122,7 @@ nothing.
 
 An open question carried for weeks: the panoramic camera decoded cleanly on the server but
 showed 9 to 27 bitstream errors per 15 seconds when played on a laptop across the network.
-The leading theory was that the restreamer's H.265 RTP packetisation corrupted it in transit,
+The leading theory was that the restreamer's H.265 RTP packetization corrupted it in transit,
 which would have been an argument for serving MPEG-TS over HTTP instead.
 
 Measured again from the same laptop, same camera, same transport, after the camera had been
@@ -136,7 +136,7 @@ migrated from its own RTSP server to the Baichuan path:
 | 4 | 15s | 0 |
 | longer run | 30s | 0, 584 frames, 20.03 fps against a configured 20 |
 
-**The theory was wrong.** The restreamer's packetisation was never the cause. The remote
+**The theory was wrong.** The restreamer's packetization was never the cause. The remote
 degradation had the same origin as the local degradation, the camera's own RTSP server, and
 migrating the source to Baichuan fixed both at once. There was never a second problem.
 

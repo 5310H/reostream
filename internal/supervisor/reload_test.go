@@ -178,7 +178,7 @@ func TestValidateCatchesWhatConfigLoadCannotAboutRTSPWiring(t *testing.T) {
 // the process exits right after Run returns. Refusing any Reload that
 // starts once ctx is already done closes the window for a Reload that has
 // not yet begun; TestReloadRacingShutdownIsFullyAwaited below covers the
-// other half, a Reload already in flight when ctx is cancelled.
+// other half, a Reload already in flight when ctx is canceled.
 func TestReloadRefusedOnceShuttingDown(t *testing.T) {
 	c := &runCounter{calls: map[string]int{}}
 	s := New([]config.Camera{
@@ -202,7 +202,7 @@ func TestReloadRefusedOnceShuttingDown(t *testing.T) {
 
 // TestReloadRacingShutdownIsFullyAwaited reproduces the 2026-09-08 failure
 // mode directly: a Reload already past Reload's own shutdown check, mid
-// stop-phase, when ctx is cancelled. Run must not return until that stop
+// stop-phase, when ctx is canceled. Run must not return until that stop
 // phase (and therefore that stream's stream-stop message) has actually
 // completed, not merely until the entry disappears from the map.
 func TestReloadRacingShutdownIsFullyAwaited(t *testing.T) {
@@ -315,7 +315,7 @@ func TestReloadCannotObserveStartedWithoutRunCtx(t *testing.T) {
 	}
 }
 
-// TestReloadSerialisesConcurrentCalls fires two Reload calls at once with
+// TestReloadSerializesConcurrentCalls fires two Reload calls at once with
 // different target camera lists, the way two browser tabs saving the camera
 // list at the same time would. Without reloadMu, both calls read the fleet
 // before either has written its changes back, compute their diffs against
@@ -323,7 +323,7 @@ func TestReloadCannotObserveStartedWithoutRunCtx(t *testing.T) {
 // with pieces of both configs, or with a stream neither config names. This
 // asserts the final fleet is exactly one config or exactly the other, never
 // a mixture, and that every stream in it is actually running.
-func TestReloadSerialisesConcurrentCalls(t *testing.T) {
+func TestReloadSerializesConcurrentCalls(t *testing.T) {
 	c := &runCounter{calls: map[string]int{}}
 	s := New([]config.Camera{
 		{Name: "a", Address: "1.1.1.1", Streams: []string{"main"}},

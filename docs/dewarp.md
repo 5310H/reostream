@@ -73,7 +73,7 @@ becomes a ray, whose angle from the lens axis picks a radius on the circle.
     r     = theta / halfFov              equidistant lens
     uv    = center + dir * r * radius    dir is the ray's bearing
 
-Fewer moving parts than a mesh, one draw call per pane, and no quantising
+Fewer moving parts than a mesh, one draw call per pane, and no quantizing
 onto vertices.
 
 Two traps, both of which shipped broken once:
@@ -99,7 +99,7 @@ the **panoramic band**, any of them in 1, 2 or 4 panes.
 ### Stereographic, as built
 
 Two lines of the shader and one uniform. The projection decides only the
-angle out from the pane's centre; the bearing around that centre is the
+angle out from the pane's center; the bearing around that center is the
 same for every projection, which is why the branch is that small:
 
     rectilinear    plane radius = tan(theta)        inverse: atan(q*tan(z))
@@ -114,7 +114,7 @@ Three numbers in the code are geometry rather than taste, and are worth not
 re-tuning by eye:
 
 - **Reset opens a stereographic pane to 0.9 rad.** A 16:9 pane's corner is
-  2.04 times its half-height out from the centre, and stereographic puts
+  2.04 times its half-height out from the center, and stereographic puts
   that corner at `2*atan(2.04*tan(z/2))`, which reaches 90 degrees off axis
   at z = 0.911. Wider is allowed and sometimes wanted -- it is the whole
   hemisphere, vignetted into a circle -- but a reset should not hand you

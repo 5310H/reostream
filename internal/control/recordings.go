@@ -26,7 +26,7 @@ type recClip struct {
 	baichuan.RecordFile
 	// Left and Width place the clip on the day's 24 hour bar, in percent.
 	Left, Width float64
-	// Kind is the clip's main record type, for its colour and filter.
+	// Kind is the clip's main record type, for its color and filter.
 	Kind string
 	// Saved is a clip the camera uploaded here; Rel is its path under the
 	// camera's folder. A saved clip plays from disk without the camera.

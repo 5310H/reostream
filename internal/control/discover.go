@@ -24,7 +24,7 @@ import (
 // from firmware contains nothing that looks like it. Guessing at it, or
 // reading it out of another implementation, is not available here -- the
 // protocol code in this repository is clean-room, and that is what the
-// licence rests on.
+// license rests on.
 //
 // So this does the boring thing instead: open a TCP connection to every
 // address in one /24 and see which ones answer on the Baichuan port. That
@@ -379,7 +379,7 @@ func (s *Server) baichuanPort() int {
 //
 // Bounded: at most sweepConcurrency dials are in flight, held by a
 // buffered channel used as a semaphore. Cancellable: every dial is a
-// DialContext on ctx, so a cancelled request aborts the connections
+// DialContext on ctx, so a canceled request aborts the connections
 // already in progress rather than only stopping new ones from starting,
 // and the semaphore acquire selects on ctx.Done too so the queued
 // addresses stop being dialled at all. Leak-free: this does not return
@@ -470,7 +470,7 @@ func (s *Server) endSweep() {
 //
 // Host only, not host:port: the sweep only ever finds hosts listening on
 // the Baichuan port, so the port carries no information here, and
-// comparing normalised host:port strings would miss a configured camera
+// comparing normalized host:port strings would miss a configured camera
 // written with an explicit non-default port.
 func configuredHosts(configPath string) map[string]bool {
 	out := make(map[string]bool)
@@ -552,7 +552,7 @@ func (s *Server) discover(ctx context.Context, ranges []netip.Prefix, user, pass
 
 	// Concurrent, bounded by the same semaphore size: these are different
 	// cameras and therefore different sessions, so there is nothing to
-	// serialise for the protocol's sake (applyAll makes the same argument
+	// serialize for the protocol's sake (applyAll makes the same argument
 	// for a fleet write). Serially, a range holding four cameras that are
 	// each holding a dead session would cost four probeTimeouts in a row.
 	res.Found = make([]DiscoveredCamera, len(candidates))
@@ -572,10 +572,11 @@ func (s *Server) discover(ctx context.Context, ranges []netip.Prefix, user, pass
 			defer func() { <-sem }()
 			// Indexed write into a pre-sized slice, so the report keeps
 			// address order rather than whichever camera answered first.
+			rep := probe(ctx, host, user, pass)
 			res.Found[i] = DiscoveredCamera{
 				Address:   host,
-				Report:    probe(ctx, host, user, pass),
-				Suggested: suggestedName(host),
+				Report:    rep,
+				Suggested: nameFor(rep, host),
 			}
 		}(i, host)
 	}
@@ -720,10 +721,11 @@ func (s *Server) serveIdentify(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout+2*time.Second)
 	defer cancel()
+	rep := probe(ctx, addr, user, r.FormValue("password"))
 	cam := DiscoveredCamera{
 		Address:   addr,
-		Report:    probe(ctx, addr, user, r.FormValue("password")),
-		Suggested: suggestedName(addr),
+		Report:    rep,
+		Suggested: nameFor(rep, addr),
 	}
 	s.renderCard(w, cam)
 }
@@ -765,4 +767,15 @@ func (s *Server) renderCard(w http.ResponseWriter, cam DiscoveredCamera) {
 	if err := t.ExecuteTemplate(w, "found-camera-card", cam); err != nil {
 		log.Printf("reostream: control: render card: %v", err)
 	}
+}
+
+// nameFor is the name a found camera is offered under: its own name, the
+// one the Reolink app shows ("Pano Parking" becomes pano_parking), so
+// reostream takes the camera's name rather than the other way round; the
+// address-based one only when the camera has none or could not be read.
+func nameFor(rep CameraReport, addr string) string {
+	if n := slugName(rep.DeviceName); n != "" {
+		return n
+	}
+	return suggestedName(addr)
 }

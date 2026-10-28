@@ -35,7 +35,7 @@ type Client struct {
 	http     *http.Client
 }
 
-// rspNotLoggedIn is what a camera returns when it does not recognise the
+// rspNotLoggedIn is what a camera returns when it does not recognize the
 // token. It arrives on connections that logged in seconds earlier, so it
 // means "log in again", not "your password is wrong".
 const rspNotLoggedIn = -6
@@ -169,7 +169,7 @@ func (c *Client) Close() error {
 	}
 	// Its own short bound rather than the caller's context: Close usually
 	// runs from a defer while the request that owns that context is being
-	// torn down, and a cancelled context would skip the logout -- leaking
+	// torn down, and a canceled context would skip the logout -- leaking
 	// the session this call exists to return.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -251,8 +251,8 @@ func (c *Client) do(ctx context.Context, cmd string, action int, param any, out 
 // setting adjustable without guessing at bounds.
 //
 // ctx bounds this call and, if the session needs a retry, the login that
-// follows it: cancelling ctx aborts whichever of those is in flight, rather
-// than only being honoured between round trips the way a caller-side
+// follows it: canceling ctx aborts whichever of those is in flight, rather
+// than only being honored between round trips the way a caller-side
 // context.WithTimeout that this method never looked at would be.
 func (c *Client) Get(ctx context.Context, cmd string, channel int) (value, initial, rng json.RawMessage, err error) {
 	var out []reply

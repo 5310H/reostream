@@ -223,7 +223,7 @@ func (c *Conn) download(ctx context.Context, from, to time.Time, sub bool, idle 
 	if err := c.SendDocument(msgDownload, downloadDoc(c.opts.Channel, sub, from, to)); err != nil {
 		return err
 	}
-	dp := NewDepacketiser()
+	dp := NewDepacketizer()
 	started, sawKey := false, false
 	quiet := time.NewTimer(30 * time.Second) // first data can take a while on a sleeping camera
 	defer quiet.Stop()

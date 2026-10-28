@@ -270,7 +270,7 @@ func (s *Server) runDailySync(ctx context.Context, now time.Time) {
 	ok, total := 0, 0
 	var failed []string
 	for _, cam := range cams {
-		if cam.UID != "" || cam.Channel != 0 {
+		if cam.UID != "" || s.behindRecorder(ctx, cam) {
 			continue
 		}
 		total++

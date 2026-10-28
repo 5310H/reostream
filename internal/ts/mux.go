@@ -103,7 +103,7 @@ func NewMuxer(codec string) (*Muxer, error) {
 // Only "aac" is accepted. These cameras also emit ADPCM, which has no
 // registered MPEG-TS stream type; the previous tool silently dropped audio
 // entirely regardless of the recorder's configured role, and nothing ever
-// alerted on it. Relabelling ADPCM as AAC would decode as noise, and
+// alerted on it. Relabeling ADPCM as AAC would decode as noise, and
 // transcoding it would put ffmpeg back in the serving path, which this
 // project exists to avoid. So an ADPCM frame is counted (DroppedAudio) and
 // dropped, never silently accepted.
@@ -224,7 +224,7 @@ func (m *Muxer) FrameWithKey(f baichuan.Frame) (chunk []byte, startsKeyframe boo
 		m.sentPCR = true
 		m.lastPCRPTS = pts
 	}
-	out = append(out, m.packetisePES(PIDVideo, pes, pcr)...)
+	out = append(out, m.packetizePES(PIDVideo, pes, pcr)...)
 	return out, isKey
 }
 
@@ -252,7 +252,7 @@ func (m *Muxer) audioFrame(f baichuan.Frame) []byte {
 	}
 	if f.Kind != baichuan.FrameAAC {
 		// ADPCM, or anything else that is not the codec this muxer was
-		// built for. Counted, never relabelled: see NewMuxerWithAudio.
+		// built for. Counted, never relabeled: see NewMuxerWithAudio.
 		m.droppedAudio++
 		return nil
 	}
@@ -266,7 +266,7 @@ func (m *Muxer) audioFrame(f baichuan.Frame) []byte {
 	// how the timestamp is reconstructed instead.
 	pts := m.audioClock.PTS(m.clock.LastPTS(), f.Data)
 	pes := buildPES(audioStreamID, pts, f.Data)
-	return m.packetisePES(PIDAudio, pes, nil)
+	return m.packetizePES(PIDAudio, pes, nil)
 }
 
 // videoStreamID and audioStreamID are the PES stream_id values for this
@@ -320,7 +320,7 @@ func writePTS(dst []byte, pts uint64) {
 	dst[4] = 0x01 | byte(pts<<1)&0xFE
 }
 
-// packetisePES splits a PES packet across 188 byte transport packets on pid,
+// packetizePES splits a PES packet across 188 byte transport packets on pid,
 // each with the PES (or its continuation) as the entire payload. pid is
 // either PIDVideo or PIDAudio; each carries its own continuity counter (see
 // the continuity type), so interleaving the two tracks never disturbs
@@ -349,8 +349,8 @@ func writePTS(dst []byte, pts uint64) {
 // appended to its last NAL. A proper adaptation field costs a handful of
 // bytes and avoids that. Audio frames are ADTS, not Annex B, so this
 // padding scheme buys them nothing, but sharing the one code path is worth
-// more than a padding style optimised for a format audio does not use.
-func (m *Muxer) packetisePES(pid PID, pes []byte, pcr *uint64) []byte {
+// more than a padding style optimized for a format audio does not use.
+func (m *Muxer) packetizePES(pid PID, pes []byte, pcr *uint64) []byte {
 	var out []byte
 	first := true
 	for len(pes) > 0 {

@@ -144,7 +144,7 @@
     r.setMount(mount.value);
   }
 
-  // Calibration. A lens is not always dead centre and not always exactly
+  // Calibration. A lens is not always dead center and not always exactly
   // 180 degrees; a few pixels out shows as a smear at the rim, so these are
   // adjustable rather than assumed.
   function bind(id, apply) {

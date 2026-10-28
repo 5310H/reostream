@@ -48,7 +48,7 @@ continuation message. Reading those as boundaries discards the partial frame on 
 message, so a 940 KB keyframe spanning hundreds of messages never completes. Both
 cameras log in, answer pings and move 6 Mbps while delivering zero decoded frames.
 
-Do not byte-scan for packet magics to resynchronise. Filler can contain a byte sequence
+Do not byte-scan for packet magics to resynchronize. Filler can contain a byte sequence
 that looks like a magic, and large frames span many messages. Framing on the message
 model gives zero resync on both codecs; scanning gave 1,137 stray bytes on a 900 KB H.264
 capture and 22,667 on 8 MB of HEVC.
@@ -154,7 +154,7 @@ Three cameras heard it, which is the point of the test: a camera mixing the audi
 own stream digitally, rather than playing it, would move only its own number. It is a real
 sound in the room.
 
-The talking camera hearing it *less* than a neighbour is not a mistake. Echo cancellation
+The talking camera hearing it *less* than a neighbor is not a mistake. Echo cancellation
 suppresses a camera's own speaker in its own microphone, which is what that hardware is
 for.
 
@@ -200,7 +200,7 @@ the document had nothing to do with the id it was sent under.
 The shape observations still stand and are now easier to read: as a single body it
 answers 421, as an extension plus a body it answers 400. A configuration *write* is the
 other way round, single section 421 and two sections accepted, so framing is per message
-and cannot be generalised from one.
+and cannot be generalized from one.
 
 The `HeartBeat` document itself was read out of the firmware and is probably accurate: an
 empty `<HeartBeat version="1.1"/>` request, with a reply carrying `size`, `sec`, `usec`,

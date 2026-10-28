@@ -24,7 +24,7 @@ func TestPFrameSkipsFalseStartCodeInPrefix(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture))) // size = real picture only
 		buf = append(buf, body...)
 
-		var d Depacketiser
+		var d Depacketizer
 		d.Write(buf, true)
 		f, ok := d.Next()
 		if !ok {
@@ -57,7 +57,7 @@ func TestPFrameNormalPrefixUnchanged(t *testing.T) {
 	buf = append(buf[:24], append(make([]byte, 8), body...)...)
 	binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture)))
 
-	var d Depacketiser
+	var d Depacketizer
 	d.Write(buf, true)
 	f, ok := d.Next()
 	if !ok {

@@ -123,20 +123,20 @@ func TestPositionSelectIsSeededFromTheCamerasOwnPair(t *testing.T) {
 		}
 	}
 	if strings.Contains(html, "an unnamed position") {
-		t.Errorf("a pair straight out of the corner table was reported as unrecognised:\n%s", html)
+		t.Errorf("a pair straight out of the corner table was reported as unrecognized:\n%s", html)
 	}
 	if strings.Contains(html, "not available:") {
 		t.Errorf("a position that resolved cleanly was rendered as unavailable:\n%s", html)
 	}
 }
 
-// TestUnrecognisedPositionIsShownNotSnapped is the honesty case. Only 1 and
+// TestUnrecognizedPositionIsShownNotSnapped is the honesty case. Only 1 and
 // 65536 were ever observed on real hardware, so any other pair is a
 // position this project cannot name -- and naming it anyway, by rounding it
 // to the nearest corner, would silently discard a position somebody chose,
 // at the very moment they opened the page to look at it. It must be shown
 // as itself, selected, with the four corners still one click away.
-func TestUnrecognisedPositionIsShownNotSnapped(t *testing.T) {
+func TestUnrecognizedPositionIsShownNotSnapped(t *testing.T) {
 	t.Parallel() // see the note on the test above
 	html := renderCameraPageWithOSD(t, `<body>`+
 		`<OsdChannelName><channelId>0</channelId><name>lounge</name><enable>1</enable><enWatermark>0</enWatermark><topLeftX>65536</topLeftX><topLeftY>65536</topLeftY></OsdChannelName>`+
@@ -144,21 +144,21 @@ func TestUnrecognisedPositionIsShownNotSnapped(t *testing.T) {
 		`</body>`)
 
 	if !strings.Contains(html, "Currently 32768,9") {
-		t.Fatalf("an unrecognised position was not shown as the camera's own pair:\n%s", html)
+		t.Fatalf("an unrecognized position was not shown as the camera's own pair:\n%s", html)
 	}
 	// Snapping would have selected a corner instead. The timestamp's pair
-	// is unrecognised so none of the corners may be selected for it; the
+	// is unrecognized so none of the corners may be selected for it; the
 	// camera name above it genuinely is bottom right, and still is.
 	for _, corner := range []string{"1,1", "65536,1", "1,65536"} {
 		if strings.Contains(html, `value="`+corner+`" checked>`) {
-			t.Errorf("an unrecognised position was snapped to the %s corner:\n%s", corner, html)
+			t.Errorf("an unrecognized position was snapped to the %s corner:\n%s", corner, html)
 		}
 	}
 	if !strings.Contains(html, "an unnamed position") {
 		t.Errorf("the page does not say why this position has no name:\n%s", html)
 	}
 	if !strings.Contains(html, `value="1,1"><span>top left</span>`) {
-		t.Errorf("the four corners are not still offered alongside the unrecognised pair:\n%s", html)
+		t.Errorf("the four corners are not still offered alongside the unrecognized pair:\n%s", html)
 	}
 }
 
@@ -186,7 +186,7 @@ func countTwoSectionWrites(received []byte, id uint32) int {
 }
 
 // TestPositionWriteCarriesBothFieldsInOneWrite is the whole point of the
-// handler's generalisation. A corner is topLeftX AND topLeftY, and two
+// handler's generalization. A corner is topLeftX AND topLeftY, and two
 // separate read-modify-write round trips would mean a camera that accepted
 // the first and refused the second left the overlay somewhere nobody chose.
 // So this asserts what reached the CAMERA, not what the page says: exactly
@@ -281,7 +281,7 @@ func TestAHalfUnappliablePositionWritesNothingAtAll(t *testing.T) {
 }
 
 // TestSingleFieldWriteStillParsesAsExactlyOneUnchangedEdit pins that
-// generalising the handler to several fields did not change what a
+// generalizing the handler to several fields did not change what a
 // one-field form does. The end-to-end proof that a single write still
 // reaches a camera is settings_test.go's
 // TestServeApplySettingWritesThroughWriteBlockAndReachesTheCamera, which
@@ -342,8 +342,8 @@ func TestBothHalvesOfAPositionAreCurated(t *testing.T) {
 }
 
 // The name and the timestamp cannot share a corner, so the corner the
-// other one holds is greyed out; not when the other one is hidden.
-func TestTheOtherOverlaysCornerIsGreyedOut(t *testing.T) {
+// other one holds is grayed out; not when the other one is hidden.
+func TestTheOtherOverlaysCornerIsGrayedOut(t *testing.T) {
 	name := Field{XPath: "OsdChannelName/topLeftX", YPath: "OsdChannelName/topLeftY", Kind: "position"}
 	p := cameraPage{Values: map[string]string{
 		"OsdChannelName/topLeftX": osdFarEdge, "OsdChannelName/topLeftY": osdFarEdge, // bottom right
@@ -358,7 +358,7 @@ func TestTheOtherOverlaysCornerIsGreyedOut(t *testing.T) {
 	p.Values["OsdDatetime/enable"] = "0"
 	for _, o := range p.Position(name).Options {
 		if o.Taken != "" {
-			t.Errorf("%s greyed out while the timestamp is hidden", o.Label)
+			t.Errorf("%s grayed out while the timestamp is hidden", o.Label)
 		}
 	}
 }

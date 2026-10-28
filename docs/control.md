@@ -204,7 +204,7 @@ only has an on switch. `mode` is what the light does; `state` is whether it is l
 
 Mapped by setting each mode over CGI and reading the Baichuan `FloodlightTask` back:
 
-| CGI mode | FloodlightTask | behaviour |
+| CGI mode | FloodlightTask | behavior |
 |---|---|---|
 | 0 | `alarmMode 0, enable 0` | off |
 | 1 | `alarmMode 1, enable 1` | lights on detection |

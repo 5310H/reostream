@@ -199,3 +199,14 @@ func hasInt(xs []int, want int) bool {
 	}
 	return false
 }
+
+// The RLC-810A sends a stream's codec range as one bare string.
+func TestStringListTakesABareString(t *testing.T) {
+	var j encStreamRangeJSON
+	if err := json.Unmarshal([]byte(`{"vType":"h265","profile":["High","Main"]}`), &j); err != nil {
+		t.Fatalf("a bare-string vType did not decode: %v", err)
+	}
+	if len(j.VType) != 1 || j.VType[0] != "h265" || len(j.Profile) != 2 {
+		t.Fatalf("got vType %v profile %v", j.VType, j.Profile)
+	}
+}

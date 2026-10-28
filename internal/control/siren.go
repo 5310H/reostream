@@ -49,10 +49,10 @@ type sirenPage struct {
 
 // readSiren fills the section from the camera, on a session the camera page
 // has already opened for the floodlight and the encoder.
-func readSiren(ctx context.Context, c *cgi.Client) sirenPage {
+func readSiren(ctx context.Context, c *cgi.Client, channel int) sirenPage {
 	page := sirenPage{Confirm: sirenConfirmReason}
 
-	cfg, rng, err := c.GetAudioCfg(ctx, 0)
+	cfg, rng, err := c.GetAudioCfg(ctx, channel)
 	if err != nil {
 		// Not an error on the page. A camera with no speaker says so by
 		// refusing the command, and the section simply does not appear --
@@ -70,7 +70,7 @@ func readSiren(ctx context.Context, c *cgi.Client) sirenPage {
 		page.VolumeMin, page.VolumeMax = 0, 100
 	}
 
-	if doc, err := c.GetAudioAlarm(ctx, 0); err == nil {
+	if doc, err := c.GetAudioAlarm(ctx, channel); err == nil {
 		page.HaveAlarm = true
 		page.AlarmOn = cgi.AudioAlarmEnabled(doc)
 	}
@@ -105,7 +105,7 @@ func (s *Server) serveApplySiren(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close()
 
-	cur, rng, err := c.GetAudioCfg(ctx, 0)
+	cur, rng, err := c.GetAudioCfg(ctx, cam.Channel)
 	if err != nil {
 		s.sirenOutcome(w, r, name, "refused", fmt.Sprintf("could not read the current volume: %v", err))
 		return
@@ -127,7 +127,7 @@ func (s *Server) serveApplySiren(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if v != cur.Volume {
-			if err := c.SetAudioCfg(ctx, 0, v); err != nil {
+			if err := c.SetAudioCfg(ctx, cam.Channel, v); err != nil {
 				s.sirenOutcome(w, r, name, "refused", fmt.Sprintf("the camera did not take the volume: %v", err))
 				return
 			}
@@ -141,13 +141,13 @@ func (s *Server) serveApplySiren(w http.ResponseWriter, r *http.Request) {
 			s.sirenOutcome(w, r, name, "refused", fmt.Sprintf("%q is not on or off", raw))
 			return
 		}
-		doc, err := c.GetAudioAlarm(ctx, 0)
+		doc, err := c.GetAudioAlarm(ctx, cam.Channel)
 		if err != nil {
 			s.sirenOutcome(w, r, name, "refused", fmt.Sprintf("could not read the alarm sound: %v", err))
 			return
 		}
 		if cgi.AudioAlarmEnabled(doc) != on {
-			if err := c.SetAudioAlarmEnabled(ctx, 0, doc, on); err != nil {
+			if err := c.SetAudioAlarmEnabled(ctx, cam.Channel, doc, on); err != nil {
 				s.sirenOutcome(w, r, name, "refused", fmt.Sprintf("the camera did not take the alarm setting: %v", err))
 				return
 			}

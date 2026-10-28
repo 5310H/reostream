@@ -111,7 +111,7 @@ func TestMuxerPadsShortPacketsWithAnAdaptationFieldNotZeros(t *testing.T) {
 	// trailing zero bytes into the preceding NAL's length field instead of
 	// discarding them as Annex B padding. A packet short of a full 184 bytes
 	// of real payload must mark the gap with a stuffed adaptation field, not
-	// leave it as the zero bytes Go initialises a new packet to.
+	// leave it as the zero bytes Go initializes a new packet to.
 	m, err := NewMuxer("h264")
 	if err != nil {
 		t.Fatal(err)
@@ -475,7 +475,7 @@ func TestAudioIsDroppedWhenTheMuxerIsVideoOnly(t *testing.T) {
 
 func TestADPCMIsDroppedRatherThanMuxedAsAAC(t *testing.T) {
 	// Some cameras emit ADPCM, which has no MPEG-TS stream type here. It is
-	// reported and dropped, never relabelled: transcoding would put ffmpeg
+	// reported and dropped, never relabeled: transcoding would put ffmpeg
 	// back in the serving path, which is a non-goal.
 	m, _ := NewMuxerWithAudio("h264", "aac")
 	m.Frame(frame(baichuan.FrameIFrame, 1000, 1))
@@ -513,9 +513,9 @@ func muxRealCapture(t *testing.T) (out []byte, fedVideoFrames, fedAudioFrames in
 	key := baichuan.AESKey(parseNonce(t, first.XML), "")
 
 	r := baichuan.NewReader(bytes.NewReader(b))
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	// The capture is known to carry 56 AAC frames alongside its video (see
-	// TestDepacketiserOnH265Capture's audio= count). Muxing with audio here,
+	// TestDepacketizerOnH265Capture's audio= count). Muxing with audio here,
 	// rather than NewMuxer's video-only form, is the whole point: production
 	// lost audio silently for days because a video-only path never surfaces
 	// that a second elementary stream even exists.

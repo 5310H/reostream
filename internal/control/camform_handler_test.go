@@ -92,7 +92,7 @@ streams = ["main"]
 
 // headerConfig is a config file that looks like one a claim wrote and a
 // person then edited: a comment header carrying the -listen warning, keys
-// capitalised the way whoever typed them capitalised them, and one camera
+// capitalized the way whoever typed them capitalized them, and one camera
 // already in it.
 const headerConfig = `# reostream config.
 #
@@ -115,7 +115,7 @@ streams = ["main"]
 
 // TestAddingACameraKeepsTheFilesCommentsAndCasing is the defect: saving a
 // camera used to re-encode the whole decoded config, which produced a file
-// with every comment gone and every key capitalised by the encoder rather
+// with every comment gone and every key capitalized by the encoder rather
 // than by the person who wrote it.
 //
 // The comment header is not decoration. It carries the warning about

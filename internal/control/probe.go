@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
+	"github.com/VoltTech21/reostream/internal/cgi"
 	"github.com/VoltTech21/reostream/internal/config"
 	"github.com/VoltTech21/reostream/internal/stream"
 )
@@ -92,6 +93,67 @@ type CameraReport struct {
 	// dual-lens camera (a TrackMix, say): the streams above are the first
 	// lens, and the second is the zoom stream when the camera answers for it.
 	Channels int
+	// Recorder is set when the device is a Reolink NVR or Home Hub rather
+	// than a camera; RecorderCams is what it has on each channel, so the
+	// page can offer them all under the recorder's one login.
+	Recorder     bool
+	RecorderCams []RecorderCam
+	// DeviceName is the camera's own name (what the Reolink app shows), so
+	// reostream can take it rather than inventing one.
+	DeviceName string
+}
+
+// RecorderCam is one camera on an NVR or Home Hub channel.
+type RecorderCam struct {
+	Channel int
+	Name    string
+	Online  bool
+}
+
+// recorderCams asks an NVR or Home Hub, over its HTTP API, which channels
+// have a camera. It reports false when addr is not a recorder at all: a
+// camera answers GetDevInfo with type IPC and has no GetChannelstatus.
+func recorderCams(ctx context.Context, addr, user, pass string) ([]RecorderCam, bool) {
+	c, err := cgi.DialContext(ctx, addr, user, pass)
+	if err != nil {
+		return nil, false
+	}
+	value, _, _, err := c.Get(ctx, "GetDevInfo", 0)
+	if err != nil {
+		return nil, false
+	}
+	var dev struct {
+		DevInfo struct{ Type, ExactType string } `json:"DevInfo"`
+	}
+	if json.Unmarshal(value, &dev) != nil {
+		return nil, false
+	}
+	kind := strings.ToLower(dev.DevInfo.Type + " " + dev.DevInfo.ExactType)
+	if !strings.Contains(kind, "nvr") && !strings.Contains(kind, "hub") && !strings.Contains(kind, "base") {
+		return nil, false
+	}
+	value, _, _, err = c.Get(ctx, "GetChannelstatus", 0)
+	if err != nil {
+		return nil, true
+	}
+	var st struct {
+		Status []struct {
+			Channel int    `json:"channel"`
+			Name    string `json:"name"`
+			Online  int    `json:"online"`
+			UID     string `json:"uid"`
+		} `json:"status"`
+	}
+	json.Unmarshal(value, &st)
+	var out []RecorderCam
+	for _, ch := range st.Status {
+		// An empty channel has neither a name nor a UID.
+		if ch.Name == "" && ch.UID == "" {
+			continue
+		}
+		out = append(out, RecorderCam{Channel: ch.Channel, Name: ch.Name, Online: ch.Online != 0})
+	}
+	return out, true
 }
 
 // probeTimeout bounds one setup probe. A sweep is not being run here: one
@@ -147,7 +209,7 @@ func (s *Server) probeGuarded(ctx context.Context, addr, user, pass string) Came
 // address running concurrently with this one: two browser tabs, a
 // double-clicked button, or a browser retry can each reach probeGuarded for
 // the same address before either has returned. Nothing about an HTTP
-// handler in Go serialises that on its own.
+// handler in Go serializes that on its own.
 func (s *Server) beginProbe(key string) bool {
 	s.inFlightMu.Lock()
 	defer s.inFlightMu.Unlock()
@@ -207,13 +269,32 @@ func (s *Server) alreadyStreaming(addr string) (msg string, blocked bool) {
 
 	want := config.NormalizeAddr(addr)
 	var cam *config.Camera
+	recorder := true
 	for i := range cfg.Cameras {
 		if config.NormalizeAddr(cfg.Cameras[i].Address) == want {
-			cam = &cfg.Cameras[i]
-			break
+			if cam == nil {
+				cam = &cfg.Cameras[i]
+			}
+			if cfg.Cameras[i].Channel == 0 {
+				recorder = false
+			}
 		}
 	}
-	if cam == nil {
+	// An address only ever used with a channel is an NVR or Home Hub, and
+	// probing a recorder opens no video (probeCamera lists its channels and
+	// returns), so it cannot contend with the streams already running
+	// through it. That is how a second camera on the same NVR gets added.
+	// Channel 0 is a recorder's first camera too; the address's own word
+	// at its last login settles it.
+	if cam != nil && !recorder {
+		// Only what the address said the last time anything here dialled
+		// it: dialling now would be the second connection this guard is
+		// here to prevent. Opening the camera's page once teaches it.
+		s.recorderMu.Lock()
+		recorder = s.recorders[want]
+		s.recorderMu.Unlock()
+	}
+	if cam == nil || recorder {
 		return "", false
 	}
 
@@ -227,7 +308,7 @@ func (s *Server) alreadyStreaming(addr string) (msg string, blocked bool) {
 // streamKnowledge describes what the daemon currently believes about cam's
 // streams, for the blocked message. This is informational only: unlike the
 // block decision above, it plays no part in deciding whether to dial, so a
-// nil StatusSource or an unrecognised stream just narrows what can be said,
+// nil StatusSource or an unrecognized stream just narrows what can be said,
 // never what gets blocked.
 func streamKnowledge(status StatusSource, cam *config.Camera) string {
 	if status == nil {
@@ -277,6 +358,24 @@ func probeCamera(ctx context.Context, addr, user, pass string) CameraReport {
 	}
 
 	rep := CameraReport{Model: modelName(conn, sup), Channels: sup.Support.ChannelNum}
+	if msg, ok := baichuan.ConfigMessages["general"]; ok {
+		nctx, ncancel := context.WithTimeout(ctx, 3*time.Second)
+		if doc, status, err := baichuan.ReadConfig(nctx, conn, msg); err == nil && status == 200 {
+			if v, ok := fieldValue(doc, "SystemGeneral/deviceName"); ok {
+				rep.DeviceName = strings.TrimSpace(v)
+			}
+		}
+		ncancel()
+	}
+
+	// An NVR or Home Hub: list its cameras instead of probing streams on
+	// the recorder itself, whose channel 0 is just its first camera.
+	if isRecorderConn(conn) {
+		if cams, ok := recorderCams(ctx, addr, user, pass); ok {
+			rep.Recorder, rep.RecorderCams = true, cams
+			return rep
+		}
+	}
 
 	// Turn on the services a non-technical user would otherwise have to find
 	// in a desktop app: RTSP so a recorder can pull the camera (and the only
@@ -386,8 +485,12 @@ func modelName(conn *baichuan.Conn, sup baichuan.Support) string {
 // password.
 func describeDialError(err error) string {
 	switch {
-	case errors.Is(err, baichuan.ErrUnauthorised):
-		return "authentication failed (401): check the username and password"
+	case errors.Is(err, baichuan.ErrUnauthorized):
+		// A Reolink NVR or Home Hub that adds a camera on its own (its
+		// "automatically add devices in LAN" switch) replaces that
+		// camera's password with a random one it keeps to itself, so a
+		// login that worked yesterday can fail with nothing typed wrong.
+		return "authentication failed (401): check the username and password. If this camera was ever added to a Reolink NVR or Home Hub, it may have set its own password: add the camera through the NVR instead (its address and channel), or set a new password for it in the NVR"
 	case strings.Contains(err.Error(), "connection refused"):
 		return "nothing is listening on port 9000 at that address"
 	case errors.Is(err, context.DeadlineExceeded):

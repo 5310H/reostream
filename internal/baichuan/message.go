@@ -150,7 +150,7 @@ func (r *Reader) Next() (Message, error) {
 		//
 		// A header that fails to parse falls back to treating the message as
 		// a packet start, which is what this did before the fisheye was
-		// tested and is the safer guess: resynchronising costs one packet,
+		// tested and is the safer guess: resynchronizing costs one packet,
 		// while wrongly appending to the previous one corrupts it.
 		m.StartsPacket = !ok || ext.BinaryData != 0
 		r.decryptPayload(&m, ext, ok)

@@ -44,3 +44,20 @@ func TestMaskDocumentHasTheAppsShape(t *testing.T) {
 		t.Errorf("no boxes should turn the mask off:\n%s", off)
 	}
 }
+
+// The camera reads masks back as shelterList and is written as ShelterList,
+// so a mask save has to be judged by the boxes, not by the bytes.
+func TestMaskSaveIsConfirmedByTheBoxesReadBack(t *testing.T) {
+	drawn := []maskRect{{0.17, 0.385, 0.398, 0.378}}
+	after := []byte(`<body><Shelter version="1.1"><channelId>0</channelId><enable>1</enable><maxNum>4</maxNum><shelterList>` +
+		`<Shelter><id>0</id><enable>1</enable><topLeftX>11142120</topLeftX><topLeftY>25232360</topLeftY><width>26084328</width><height>24773608</height></Shelter>` +
+		`<Shelter><id>1</id><enable>0</enable></Shelter></shelterList></Shelter></body>`)
+	got := checkMasks(WriteResult{Outcome: "accepted", After: after}, drawn)
+	if got.Outcome != "confirmed" {
+		t.Errorf("held box reported %q: %s", got.Outcome, got.Detail)
+	}
+	none := checkMasks(WriteResult{Outcome: "accepted", After: after}, nil)
+	if none.Outcome != "refused" {
+		t.Errorf("box still held after removing every box reported %q", none.Outcome)
+	}
+}

@@ -59,7 +59,7 @@ func GetStreamInfo(ctx context.Context, addr string, opts Options, stream string
 	}
 
 	var info StreamInfo
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	for info.Codec == "" || (info.Width == 0 && info.Height == 0) {
 		select {
 		case m, ok := <-conn.Messages():

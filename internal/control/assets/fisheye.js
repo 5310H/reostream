@@ -12,7 +12,7 @@
 // keep the geometry in the fragment shader: one screen-filling triangle
 // pair, and for every output pixel we work out which direction it looks
 // and sample the circle there. That is fewer moving parts, it costs one
-// draw call per pane, and it does not quantise the picture onto a mesh.
+// draw call per pane, and it does not quantize the picture onto a mesh.
 
 (function () {
   'use strict';
@@ -38,7 +38,7 @@
     'precision highp float;',
     'varying vec2 v_ndc;',
     'uniform sampler2D u_tex;',
-    'uniform vec2  u_center;',   // circle centre, texture units
+    'uniform vec2  u_center;',   // circle center, texture units
     'uniform float u_radius;',   // circle radius, texture units
     'uniform float u_halfFov;',  // half the lens field of view, radians
     'uniform float u_yaw;',
@@ -53,10 +53,10 @@
     // The ray this output pixel looks along, in the virtual camera's own
     // frame, before it is aimed anywhere.
     //
-    // Only the angle out from the pane's centre depends on the projection;
-    // the bearing around that centre never does, which is why both branches
+    // Only the angle out from the pane's center depends on the projection;
+    // the bearing around that center never does, which is why both branches
     // share p/q below and differ in one line. Both are written so that the
-    // pane's vertical edge sits at exactly u_zoom from the centre whichever
+    // pane's vertical edge sits at exactly u_zoom from the center whichever
     // is chosen, so switching projection does not also change the zoom.
     //
     //   rectilinear    plane radius = tan(theta)      inverse: atan(q*tan(z))
@@ -100,9 +100,9 @@
     '    float phi = u_yaw + v_ndc.x * u_zoom;',
     // Up the screen is away from whatever the strip is unrolled around, and
     // that axis points opposite ways in the two mounts: a ceiling lens looks
-    // DOWN, so moving up the strip means moving out towards the horizon,
+    // DOWN, so moving up the strip means moving out toward the horizon,
     // while a wall band is measured from the room's upright, where moving up
-    // means moving towards it. Get this backwards and the panorama is
+    // means moving toward it. Get this backwards and the panorama is
     // upside down while every other number in it still checks out.
     '    float vsign = u_ceiling > 0.5 ? 1.0 : -1.0;',
     '    float tb  = u_pitch + vsign * v_ndc.y * (u_zoom / u_aspect);',
@@ -118,10 +118,10 @@
     // The ray this output pixel looks along, in the virtual camera's own
     // frame, before it is aimed anywhere.
     //
-    // Only the angle out from the pane's centre depends on which of these
-    // two it is; the bearing around that centre does not, which is why the
+    // Only the angle out from the pane's center depends on which of these
+    // two it is; the bearing around that center does not, which is why the
     // branch is one line. Both are scaled so the pane's vertical edge sits
-    // at exactly u_zoom from the centre, so switching between them does not
+    // at exactly u_zoom from the center, so switching between them does not
     // also change the zoom.
     //
     //   rectilinear    plane radius = tan(theta)      inverse: atan(q*tan(z))
@@ -131,7 +131,7 @@
     '    float theta0 = u_proj < 0.5',
     '      ? atan(q * tan(u_zoom))',
     '      : 2.0 * atan(q * tan(u_zoom * 0.5));',
-    // At dead centre the bearing is undefined and q cancels nothing, so the
+    // At dead center the bearing is undefined and q cancels nothing, so the
     // ray is the axis itself rather than a division by zero.
     '    vec3 d = q > 0.000001',
     '      ? vec3(p / q * sin(theta0), cos(theta0))',
@@ -246,7 +246,7 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
     // Sensible defaults for a circle inscribed in a square frame. The page
-    // exposes these because a lens is not always centred and not always
+    // exposes these because a lens is not always centered and not always
     // exactly 180 degrees, and a few pixels out is visible at the rim.
     this.center = [0.5, 0.5];
     this.radius = 0.5;
@@ -279,8 +279,8 @@
   };
 
   // bandCenter is where the middle of a strip sits, measured from whichever
-  // axis the band is unrolled around. A ceiling band is centred halfway out
-  // to the rim; a wall band is centred on the horizon, which is a quarter
+  // axis the band is unrolled around. A ceiling band is centered halfway out
+  // to the rim; a wall band is centered on the horizon, which is a quarter
   // turn from the upright it runs around.
   Renderer.prototype.bandCenter = function () {
     return this.ceiling ? this.halfFov / 2 : Math.PI / 2;
@@ -296,7 +296,7 @@
   //
   // That is the opposite of what this page did until it was looked at. The
   // one fisheye here is on a wall, and its picture only came out upright on
-  // the setting labelled Ceiling -- which is the same thing as saying the
+  // the setting labeled Ceiling -- which is the same thing as saying the
   // two were the wrong way round. The wall half of this is measured; the
   // ceiling half is the mirror of it, and wants a real ceiling camera in
   // front of an operator before anyone calls it confirmed.
@@ -308,7 +308,7 @@
     if (where !== 'ceiling' && where !== 'wall') where = 'ceiling';
     this.ceiling = where === 'ceiling';
     this.flip = this.ceiling ? -1 : 1;
-    // A band's width and centre are both mount-dependent, so the panes are
+    // A band's width and center are both mount-dependent, so the panes are
     // laid out again rather than left pointing at where the other mount's
     // strip used to be.
     if (this.projection === 2) this.setLayout(this.views.length);

@@ -10,7 +10,7 @@ import (
 // check is therefore the entire bound on how fast the page can be guessed
 // at, and claimPasswordMinLength's arithmetic is written against it.
 //
-// So the cost is a behaviour worth a test. A refactor that cached the
+// So the cost is a behavior worth a test. A refactor that cached the
 // derived password, or dropped the iteration count to make a test suite
 // faster, would silently return the login to ~8,400 guesses a second and
 // leave a 12 character floor that was only ever justified by this.

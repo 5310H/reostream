@@ -26,12 +26,12 @@ func nonceFromCapture(t *testing.T, name string) string {
 // The H.265 main stream exercises what the H.264 substream cannot: frames
 // large enough to span many messages, with the camera's trailing filler
 // between a packet's end and the end of its final message.
-func TestDepacketiserOnH265Capture(t *testing.T) {
+func TestDepacketizerOnH265Capture(t *testing.T) {
 	name := "h265_s2c.bin"
 	key := AESKey(nonceFromCapture(t, name), "")
 
 	r := NewReader(bytes.NewReader(loadFixture(t, name)))
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	var iframes, pframes, audio int
 	var codec string
 	var lastMicros uint32
@@ -94,7 +94,7 @@ func TestDepacketiserOnH265Capture(t *testing.T) {
 // A media packet carries camera metadata between its header and the first
 // NAL start code: 112 bytes on some HEVC frames, 80 on others, and 104 to
 // 184 on the fisheye's H.264. The packet's size field does not count it, so
-// the depacketiser skips it and every frame it emits now begins at a NAL
+// the depacketizer skips it and every frame it emits now begins at a NAL
 // boundary. This test holds that line: a nonzero offset here means the
 // prefix is being handed to the decoder again, and, since the prefix is what
 // makes a packet longer than hdr+size, that the tail of every frame is being
@@ -103,7 +103,7 @@ func TestFramesBeginAtANALBoundary(t *testing.T) {
 	name := "h265_s2c.bin"
 	key := AESKey(nonceFromCapture(t, name), "")
 	r := NewReader(bytes.NewReader(loadFixture(t, name)))
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	offsets := map[int]int{}
 
 	for i := 0; ; i++ {

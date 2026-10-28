@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +43,14 @@ type camHead struct {
 	Firmware string
 	// WiFi is a Wi-Fi camera's signal in dBm (msg 115), 0 when unknown.
 	WiFi int
+	// Battery is a battery camera's charge in percent (msg 253), when
+	// HasBattery says it was read; Charging is whether it is taking a
+	// charge right now.
+	Battery    int
+	HasBattery bool
+	Charging   bool
+	// DeviceName is the camera's own name, what the Reolink app shows.
+	DeviceName string
 	// HasSD is a card in the camera; HasClips shows the Recordings tab
 	// (a card, or clips the camera saved here).
 	HasSD    bool
@@ -63,6 +72,14 @@ type camIdent struct {
 	Firmware string
 	// WiFi is a Wi-Fi camera's signal in dBm (msg 115), 0 when unknown.
 	WiFi int
+	// Battery is a battery camera's charge in percent (msg 253), when
+	// HasBattery says it was read; Charging is whether it is taking a
+	// charge right now.
+	Battery    int
+	HasBattery bool
+	Charging   bool
+	// DeviceName is the camera's own name, what the Reolink app shows.
+	DeviceName string
 	// Zoom is a second lens (TrackMix), over Baichuan or the camera's RTSP.
 	Zoom bool
 	at   time.Time
@@ -120,6 +137,25 @@ func (s *Server) identFor(ctx context.Context, cam Camera) camIdent {
 		if err == nil && status == 200 {
 			id.Model, _ = fieldValue(doc, "VersionInfo/type")
 			id.Firmware, _ = fieldValue(doc, "VersionInfo/firmwareVersion")
+			if !isRecorderConn(conn) {
+				if v, ok := fieldValue(doc, "VersionInfo/name"); ok {
+					id.DeviceName = strings.TrimSpace(v)
+				}
+			}
+		}
+	}
+	// Behind a hub or NVR, versioninfo describes the recorder. The
+	// recorder's own HTTP API knows the camera on each channel
+	// (GetChnTypeInfo: "Reolink TrackMix PoE", its firmware), so ask it.
+	if cam.Channel != 0 || isRecorderConn(conn) {
+		if c, err := s.cgiDial(cam); err == nil {
+			defer c.Close()
+			if value, _, _, err := c.Get(ctx, "GetChnTypeInfo", cam.Channel); err == nil {
+				var v struct{ TypeInfo, FirmVer string }
+				if json.Unmarshal(value, &v) == nil && v.TypeInfo != "" {
+					id.Model, id.Firmware = v.TypeInfo, v.FirmVer
+				}
+			}
 		}
 	}
 	// A card in the slot: the support block's record (3 on an Argus with a
@@ -146,7 +182,54 @@ func (s *Server) identFor(ctx context.Context, cam Camera) camIdent {
 			}
 		}
 	}
+	// A battery camera's own battery report, on the connection this page
+	// already woke it for: its charge, and whether it is charging, which
+	// is how a charger that is not doing anything gets noticed.
+	if cam.UID != "" {
+		// Just woken, the Argus answers this one 400 (busy) at first and
+		// the real report a second or two later, so ask twice.
+		var doc []byte
+		var status int16
+		var err error
+		for try := 0; try < 3; try++ {
+			if try > 0 {
+				time.Sleep(1500 * time.Millisecond)
+			}
+			rctx, rcancel := context.WithTimeout(ctx, readTimeout)
+			doc, status, err = baichuan.ReadConfig(rctx, conn, baichuan.MsgIDBatteryInfoGet)
+			rcancel()
+			if err != nil || status == 200 {
+				break
+			}
+		}
+		if err == nil && status == 200 {
+			if v, ok := fieldValue(doc, "BatteryInfo/batteryPercent"); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					id.Battery, id.HasBattery = n, true
+				}
+			}
+			if v, ok := fieldValue(doc, "BatteryInfo/chargeStatus"); ok {
+				id.Charging = strings.EqualFold(strings.TrimSpace(v), "charging")
+			}
+		}
+	}
 	id.HasSD = id.Support != nil && (id.Support.Support.DiskNum > 0 || id.Support.Support.Record > 0)
+	// Behind an NVR or Home Hub the recordings are on the recorder's own
+	// disks, searched on this camera's channel; the support block the
+	// recorder answers for a channel does not count them, so ask the
+	// recorder whether it has a disk at all.
+	if cam.Channel != 0 || isRecorderConn(conn) {
+		id.HasSD = false
+		if c, err := s.cgiDial(cam); err == nil {
+			defer c.Close()
+			if value, _, _, err := c.Get(ctx, "GetHddInfo", 0); err == nil {
+				var v struct {
+					HddInfo []json.RawMessage `json:"HddInfo"`
+				}
+				id.HasSD = json.Unmarshal(value, &v) == nil && len(v.HddInfo) > 0
+			}
+		}
+	}
 	if cam.UID == "" && cam.Channel == 0 {
 		zctx, zcancel := context.WithTimeout(ctx, 8*time.Second)
 		_, _, _, zerr := stream.ZoomInfo(zctx, cam.Address, cam.Username, cam.Password)
@@ -223,6 +306,8 @@ func (s *Server) camHeadFor(ctx context.Context, cam Camera, tab, cat string) ca
 	// wakes its support block can read as having none.
 	h.Model, h.Firmware, h.HasSD = id.Model, id.Firmware, id.HasSD || cam.UID != ""
 	h.WiFi = id.WiFi
+	h.Battery, h.HasBattery, h.Charging = id.Battery, id.HasBattery, id.Charging
+	h.DeviceName = id.DeviceName
 	h.HasClips = h.HasSD || s.hasSavedClips(cam.Name)
 	for _, g := range settingsCats(id.Support) {
 		ng := camNavGroup{Title: g.group}

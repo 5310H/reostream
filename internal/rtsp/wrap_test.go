@@ -78,7 +78,7 @@ func TestRTPTimestampsSurviveTheCameraClockWrap(t *testing.T) {
 
 	// Walk the camera clock up to its last 33 milliseconds and over the
 	// edge, at one ordinary frame interval per step, reusing real frames so
-	// the encoder has genuine NALs to packetise.
+	// the encoder has genuine NALs to packetize.
 	const step = 33_000 // microseconds between frames
 	go func() {
 		for i := 0; i < 40; i++ {

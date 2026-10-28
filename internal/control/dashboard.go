@@ -48,7 +48,7 @@ func (s *Server) cameraGroups() []cameraGroup {
 			order = append(order, t.Camera)
 		}
 	}
-	sort.Strings(order)
+	s.sortByConfig(order)
 
 	out := make([]cameraGroup, 0, len(order))
 	for _, camera := range order {
@@ -128,7 +128,16 @@ func (s *Server) statusCards(urls RecorderURLs) []statusCard {
 			groups = append(groups, cameraGroup{Camera: name})
 		}
 	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].Camera < groups[j].Camera })
+	names := make([]string, len(groups))
+	for i, g := range groups {
+		names[i] = g.Camera
+	}
+	s.sortByConfig(names)
+	rank := make(map[string]int, len(names))
+	for i, n := range names {
+		rank[n] = i
+	}
+	sort.SliceStable(groups, func(i, j int) bool { return rank[groups[i].Camera] < rank[groups[j].Camera] })
 
 	codecs := s.codecsByCamera()
 	out := make([]statusCard, 0, len(groups))
@@ -162,7 +171,7 @@ func (s *Server) statusCards(urls RecorderURLs) []statusCard {
 
 // streamRank orders a camera's streams the way an operator reads them:
 // the main picture first, then the small one, then the balanced one.
-// Anything unrecognised sorts after those, keeping its own order.
+// Anything unrecognized sorts after those, keeping its own order.
 func streamRank(name string) int {
 	switch name {
 	case "main":
@@ -196,7 +205,7 @@ func cameraState(rows []row) string {
 	return worst
 }
 
-// railEntry is one camera in the sidebar: a name and a state colour.
+// railEntry is one camera in the sidebar: a name and a state color.
 type railEntry struct {
 	Name  string
 	State string

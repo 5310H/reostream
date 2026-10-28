@@ -294,7 +294,7 @@ func TestUndoPostsThePreviousDocumentThroughTheVerifiedWritePath(t *testing.T) {
 // TestARefusedCuratedWriteReportsAsRefusedNotAsSuccess is the case the
 // inferred image XPaths make realistic: a curated field whose path this
 // camera's document does not carry. Condensing the report must not soften
-// it -- a refusal is still a refusal, in the refused colour, carrying the
+// it -- a refusal is still a refusal, in the refused color, carrying the
 // reason.
 func TestARefusedCuratedWriteReportsAsRefusedNotAsSuccess(t *testing.T) {
 	pair, ok := pairForName("isp get")

@@ -12,7 +12,7 @@ Usage:
     # drive the phone or desktop client, touch the setting you care about
     python3 tools/capture_msgids.py /tmp/bc.pcap
 
-It prints each message id seen with the XML root element that travelled with
+It prints each message id seen with the XML root element that traveled with
 it, which is the mapping that is missing. Handshake messages are encrypted
 with the BC XOR cipher and the rest with AES, so plaintext XML only appears
 for messages sent before the switch, or when a key is supplied. Even without

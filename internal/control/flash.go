@@ -43,7 +43,7 @@ const flashCookie = "reostream_flash"
 //
 // Outcome is the same vocabulary WriteResult uses -- confirmed, accepted,
 // refused -- because the banner must not soften a refusal into a tick. The
-// template picks its colour from it, out of the same three variables
+// template picks its color from it, out of the same three variables
 // style.css already spends on write outcomes.
 type Flash struct {
 	Outcome string
@@ -147,7 +147,7 @@ func (s *Server) flashKey(r *http.Request) string {
 }
 
 // newFlashID is the value of the fallback cookie: a random id and nothing
-// else. It is not a credential -- it authorises nothing, and an install
+// else. It is not a credential -- it authorizes nothing, and an install
 // with no password has no session for it to stand in for -- but it is
 // generated the same way anyway, because guessing it would mean picking up
 // somebody else's banner and the undo document in it.

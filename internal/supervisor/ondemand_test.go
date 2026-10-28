@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VoltTech21/reostream/internal/bcudp"
 	"github.com/VoltTech21/reostream/internal/config"
 	"github.com/VoltTech21/reostream/internal/hub"
 	"github.com/VoltTech21/reostream/internal/stream"
@@ -23,11 +24,15 @@ func fastWake(t *testing.T) {
 	t.Cleanup(func() { stillWait = sw })
 	wakeIdle, wakeMax, wakeCooldown, wakePoll, wakeRetry = 100*time.Millisecond, 400*time.Millisecond, 50*time.Millisecond, 10*time.Millisecond, 5*time.Millisecond
 	t.Cleanup(func() { wakeIdle, wakeMax, wakeCooldown, wakePoll, wakeRetry = idle, max, cool, poll, retry })
+	// Keep the wake watcher off the network: no camera answers its search.
+	search := wakeSearch
+	wakeSearch = func(context.Context, string) (bcudp.Info, error) { return bcudp.Info{}, errors.New("no camera") }
+	t.Cleanup(func() { wakeSearch = search })
 }
 
 var battery = config.Camera{Name: "porch", Address: "192.0.2.10", UID: "95270000TESTUID1"}
 
-// counting runs a session until it is cancelled, counting wakes and
+// counting runs a session until it is canceled, counting wakes and
 // tracking whether one is in progress.
 func counting(wakes, awake *int32) Runner {
 	return func(ctx context.Context, cfg stream.Config, h *hub.Hub) error {
@@ -214,7 +219,7 @@ func TestFirstPictureIsTakenOnceAndKept(t *testing.T) {
 	}
 }
 
-// streamsWoken runs a session until it is cancelled, recording which
+// streamsWoken runs a session until it is canceled, recording which
 // stream woke and whether any session is in progress.
 func streamsWoken(woke chan<- string, awake *int32) Runner {
 	return func(ctx context.Context, cfg stream.Config, h *hub.Hub) error {

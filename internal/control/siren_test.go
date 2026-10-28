@@ -241,7 +241,7 @@ func TestReadSirenOffersNothingWhenTheCameraRefuses(t *testing.T) {
 	}
 	defer c.Close()
 
-	page := readSiren(t.Context(), c)
+	page := readSiren(t.Context(), c, 0)
 	if page.Have {
 		t.Error("a camera with no speaker was given a volume slider")
 	}

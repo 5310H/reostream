@@ -35,10 +35,10 @@ func silentCamera(t *testing.T) string {
 	return ln.Addr().String()
 }
 
-// A stream's ctx has no deadline. Cancelling it has to end a login the
+// A stream's ctx has no deadline. Canceling it has to end a login the
 // camera never answers, or stopping that stream (removing the camera)
 // waits forever.
-func TestDialReturnsWhenCtxIsCancelledDuringASilentLogin(t *testing.T) {
+func TestDialReturnsWhenCtxIsCanceledDuringASilentLogin(t *testing.T) {
 	addr := silentCamera(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
@@ -54,7 +54,7 @@ func TestDialReturnsWhenCtxIsCancelledDuringASilentLogin(t *testing.T) {
 			t.Fatalf("Dial: got %v, want context.Canceled", err)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("Dial still blocked in login 3s after its ctx was cancelled")
+		t.Fatal("Dial still blocked in login 3s after its ctx was canceled")
 	}
 }
 

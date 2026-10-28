@@ -55,7 +55,7 @@ func TestEveryTimezoneChoiceLabelsItsOwnNumber(t *testing.T) {
 		}
 		seen[c.Seconds] = true
 		if want := utcOffsetLabel(c.Seconds); c.Label != want {
-			t.Errorf("offset %d is labelled %q, want %q", c.Seconds, c.Label, want)
+			t.Errorf("offset %d is labeled %q, want %q", c.Seconds, c.Label, want)
 		}
 	}
 	// The measured camera's own offset must be pickable, or the fleet this

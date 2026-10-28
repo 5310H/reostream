@@ -11,10 +11,10 @@ the ffmpeg or ffprobe output if a client is complaining.
 
 ## Code
 
-Pull requests need a signed contributor licence agreement. See `CLA.md`. A bot will ask
+Pull requests need a signed contributor license agreement. See `CLA.md`. A bot will ask
 you to sign the first time you open one, and it never comes up again.
 
-The reason is that this project is AGPL with commercial licences sold separately, which
+The reason is that this project is AGPL with commercial licenses sold separately, which
 only works while one person holds the copyright to all of it. Without the agreement, your
 patch could never be included in a commercially licensed build, and the practical result
 would be that it could not be merged at all.

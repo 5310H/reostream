@@ -177,7 +177,7 @@ func (h *Hub) Subscribe() (<-chan []byte, func()) {
 //
 // Call this when the stream feeding the hub stops. Without it, an HTTP
 // handler blocked in its read select (internal/server) only notices its
-// stream is gone when its request context is cancelled, which on shutdown
+// stream is gone when its request context is canceled, which on shutdown
 // is the full 5 second timeout rather than an immediate close.
 func (h *Hub) Close() {
 	h.mu.Lock()
@@ -331,7 +331,7 @@ func (h *Hub) Header() []byte {
 // a client slot and a keyframe wait for no reason: a still only needs the
 // bytes that are already sitting here.
 //
-// es is not copied. internal/baichuan.Depacketiser allocates a fresh Data
+// es is not copied. internal/baichuan.Depacketizer allocates a fresh Data
 // slice per frame (see its Next), so this never ends up holding a buffer
 // that gets overwritten by the next frame out from under a concurrent
 // reader.

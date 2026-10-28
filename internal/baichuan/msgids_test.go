@@ -40,7 +40,7 @@ func TestFiveIsReplayStartNotHeartBeat(t *testing.T) {
 }
 
 // An id the table does not carry must read as unknown rather than as some
-// neighbouring message, since the table is explicitly not exhaustive.
+// neighboring message, since the table is explicitly not exhaustive.
 func TestUnknownIDHasNoName(t *testing.T) {
 	if got := MsgName(99999); got != "" {
 		t.Errorf("MsgName(99999) = %q, want empty", got)
@@ -84,7 +84,7 @@ func containsWord(desc, verb string) bool {
 	return false
 }
 
-// Pairing must be on the firmware's exact wording. Normalising "osd get" and
+// Pairing must be on the firmware's exact wording. Normalizing "osd get" and
 // "get osd" onto one key pairs 44 with 30, and a write sent to the wrong
 // message id is the one mistake here with real consequences.
 func TestConfigPairsMatchOnExactDescription(t *testing.T) {

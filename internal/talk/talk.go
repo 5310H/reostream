@@ -105,10 +105,35 @@ func (s *Session) Close() error {
 		_ = s.conn.Talk(baichuan.TalkPacket(s.enc.EncodeBlock(s.pending)))
 		s.pending = nil
 	}
-	// Best effort: "talk close" is the message the NVR's own client sends
-	// to end a session. Closing the connection ends it either way.
-	_ = s.conn.RawChannelRequest(baichuan.MsgIDTalkClose)
+	// "talk close" is the message the Reolink app sends to end a session,
+	// and the app waits for the camera's answer before it hangs up.
+	// Hanging up at once left an RLC-833A refusing every later talk
+	// session with 422 until it rebooted (#18), so wait for the answer,
+	// briefly, before closing.
+	if err := s.conn.RawChannelRequest(baichuan.MsgIDTalkClose); err == nil {
+		waitFor(s.conn.Messages(), baichuan.MsgIDTalkClose, talkCloseWait)
+	}
 	return s.conn.Close()
+}
+
+// talkCloseWait bounds the wait for a camera's answer to talk close.
+var talkCloseWait = 2 * time.Second
+
+// waitFor reads msgs until one with id arrives, the channel closes, or d
+// passes, dropping anything else (the camera's own talk audio, keepalives).
+func waitFor(msgs <-chan baichuan.Message, id uint32, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	for {
+		select {
+		case m, ok := <-msgs:
+			if !ok || m.Header.MsgID == id {
+				return
+			}
+		case <-t.C:
+			return
+		}
+	}
 }
 
 // resampler converts between sample rates by linear interpolation, carrying

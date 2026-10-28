@@ -27,7 +27,7 @@ func feed(t *testing.T, s *Stream, frames []baichuan.Frame, n int) {
 
 // feedUntilReady runs frames through until the stream can describe itself.
 // That takes more than one keyframe: the description is fixed at
-// initialisation, so the stream waits to see whether audio turns up.
+// initialization, so the stream waits to see whether audio turns up.
 func feedUntilReady(t *testing.T, s *Stream, frames []baichuan.Frame) {
 	t.Helper()
 	for _, f := range frames {
@@ -76,7 +76,7 @@ func playAndExpectRTP(t *testing.T, c *gortsplib.Client, addr, path string, s *S
 		t.Fatalf("play: %v", err)
 	}
 
-	// Feed after PLAY: packetisation is gated on the reader count, so frames
+	// Feed after PLAY: packetization is gated on the reader count, so frames
 	// sent before a reader attaches are deliberately dropped.
 	done := make(chan struct{})
 	go func() {

@@ -31,7 +31,7 @@ func TestCheckDoesNotShortCircuitOnLength(t *testing.T) {
 		t.Fatal("two different passwords hashed equal")
 	}
 
-	// And the behaviour must be unchanged for callers.
+	// And the behavior must be unchanged for callers.
 	if !a.Check("the-real-password") {
 		t.Error("the right password was refused")
 	}

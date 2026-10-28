@@ -147,7 +147,7 @@ func TestTheClaimTokenIsSingleUse(t *testing.T) {
 		t.Fatalf("the first claim answered %d, want 303", rec.Code)
 	}
 	if s.claimToken() != "" {
-		t.Fatal("the token survived the claim it authorised")
+		t.Fatal("the token survived the claim it authorized")
 	}
 	if rec := postClaimFrom(t, s, "192.168.1.10:5000", tok, "attacker"); rec.Code != http.StatusNotFound {
 		t.Fatalf("a second claim with the same token answered %d, want 404", rec.Code)

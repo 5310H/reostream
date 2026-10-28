@@ -93,7 +93,7 @@ func TestShortBlockIsPaddedNotTruncated(t *testing.T) {
 
 // A custom siren sound is one continuous stream of codes, high nibble first,
 // no block preambles: the Reolink app's own upload of 3 s of a quiet room
-// decoded that way centres on zero, and the other way drifts (2026-10-26).
+// decoded that way centers on zero, and the other way drifts (2026-10-26).
 func TestEncodeStreamIsHighNibbleFirstAndRoundTrips(t *testing.T) {
 	pcm := make([]int16, 1600)
 	for i := range pcm {
@@ -116,5 +116,21 @@ func TestEncodeStreamIsHighNibbleFirstAndRoundTrips(t *testing.T) {
 	var e Encoder
 	if first := e.encodeSample(pcm[0]); b[0]>>4 != first {
 		t.Errorf("first code %x is not in the high nibble of %02x", first, b[0])
+	}
+}
+
+// A talk block is packed first sample in the high nibble, like the Reolink
+// app's own talk packets. The round trip above cannot catch the order being
+// swapped, since encoder and decoder would swap together, and the camera
+// still plays the swapped order as recognizable speech, only rough.
+func TestTalkBlockIsHighNibbleFirst(t *testing.T) {
+	var e Encoder
+	// A loud first sample and silence after: the first code is a big step
+	// up (0x7), the second a step back down (sign bit set).
+	pcm := make([]int16, SamplesPerBlock)
+	pcm[0] = 20000
+	b := e.EncodeBlock(pcm)
+	if hi, lo := b[4]>>4, b[4]&15; hi != 7 || lo&8 == 0 {
+		t.Errorf("first data byte %02x: want the first sample's code 7 in the high nibble and a negative step in the low", b[4])
 	}
 }

@@ -62,10 +62,14 @@ the search does not find them.
 reostream is in Community Apps: search for **reostream** in the Apps tab and install it.
 The claim token is in the container's log (Docker tab, click the icon, Logs).
 
+The template runs the container as `nobody:users` (`--user 99:100` under Extra
+Parameters), the user that owns appdata on Unraid, so the folder needs no setup. A
+template installed before v0.2.4 lacks that line: add `--user 99:100` under Advanced
+View > Extra Parameters, or the claim cannot save its config.
+
 To add the template by hand instead, in the Unraid terminal:
 
 ```
-mkdir -p /mnt/user/appdata/reostream && chown 65532:65532 /mnt/user/appdata/reostream
 wget -O /boot/config/plugins/dockerMan/templates-user/my-reostream.xml \
   https://raw.githubusercontent.com/VoltTech21/reostream/main/contrib/unraid/reostream.xml
 ```
@@ -131,6 +135,19 @@ rtsp = ["main", "sub"]
 - Unknown keys are an error at startup, so a typo fails at boot instead of serving 404s.
 - Saving from the page validates first and reloads only the cameras that changed.
 
+### Sideways cameras
+
+The 16 MP dual-lens cameras on Reolink's newer board (Duo 3 hardware IPC_NT17NA616MP, Elite
+Pro Floodlight PoE, and the same board sold under other names) send their full 7680x2160
+resolution turned 90 degrees, and tell the app to turn it back. reostream reads that at login
+and marks the stream to be shown turned (an H.265 display orientation note, not a re-encode),
+only while the picture really is taller than it is wide: their lower resolutions and the sub
+stream are untouched. ffmpeg honors the note, so Frigate's detection and snapshots see the
+picture upright.
+
+`rotate` overrides it for one camera: `rotate = 90`, `180` or `270` (degrees anticlockwise)
+to turn any H.265 camera, or `rotate = 0` to leave a camera alone whatever it says.
+
 ### Home Hub and NVR cameras
 
 A camera paired to a Reolink Home Hub or NVR is reached through the hub, as a numbered
@@ -156,9 +173,27 @@ streams = ["main", "sub"]
 ```
 
 Channels are added by hand in the config for now; the Setup page does not ask for one.
-Video works for hub cameras, but their per-camera settings page is refused, because those
-settings would reach channel 0 instead. This is untested on a real hub so far, so please
-report how it goes.
+Every stream works through the recorder (main, sub, extern, and a TrackMix's zoom), and so
+does the camera's settings page: each setting is read and written on that camera's channel.
+The pages that set the whole device (date and time, network ports) are refused for a
+channel camera, because behind a recorder they would change the recorder itself. Tested on
+an RLN8-410 with a TrackMix PoE.
+
+A camera can be on an NVR and reostream at the same time. Each camera serves two main
+stream connections, so an NVR recording main plus reostream fits.
+
+#### NVR and Home Hub auto-add changes camera passwords
+
+With "Automatically add devices in LAN" on, a Reolink NVR or Home Hub adopts every camera
+on its network that is still on the default login (admin, no password) and replaces that
+camera's password with a random one it keeps to itself. Nothing says so, and removing the
+camera from the NVR does not put the old password back. reostream then gets
+"authentication failed (401)" from a camera that worked the day before.
+
+To avoid it, give each camera a password before an NVR or hub goes on the same network, or
+turn that switch off. To recover a camera it has already taken, either add the camera
+through the NVR (its address and channel, as above, with the NVR's login), or add it back to
+the NVR and use the NVR's own camera settings to set a password you choose.
 
 ## Control page
 
@@ -290,10 +325,9 @@ password = "$BACKYARD_PW"
 - The streaming port and RTSP refuse its streams, so a recorder cannot hold it awake.
 - Its tile shows the last picture from the last time it was awake, and its battery level,
   read from the UDP search without waking it.
-- Motion: turn on Settings > Auto-save motion clips for it. The camera then uploads each
-  motion clip by itself while staying asleep otherwise, and each upload counts as motion
-  for alerts (`reostream/<camera>/motion` on MQTT), about 20 seconds after the motion, when
-  the camera's first file arrives. Motion goes off 30 seconds after its last file.
+- Motion: live, with nothing to set up. When the camera wakes for motion, reostream wakes
+  its stream within about a second, so the presence stream carries the motion live, and
+  reports it (`reostream/<camera>/motion` on MQTT). See [Motion](#motion) below.
 - Listing `streams` on a battery camera streams it all the time. Only do that on one with
   constant power.
 
@@ -301,7 +335,7 @@ password = "$BACKYARD_PW"
 
 `rtsp://host:8561/<camera>` is a battery camera's presence stream: its last picture once a
 second, each motion clip played in as it arrives, and live video while someone watches it
-on the control page. It never wakes the camera, so a recorder can hold it open around the
+on the control page or while the camera sees motion. It never wakes the camera, so a recorder can hold it open around the
 clock. Point Frigate at it with detection off, and add `-fpsprobesize 0` to the input:
 at one frame a second, ffmpeg otherwise spends 20 seconds measuring the frame rate before
 it outputs anything, Frigate gives up at 20 seconds, and the camera never records.
@@ -326,15 +360,23 @@ cameras:
 
 #### Motion
 
-Turn on **Auto-save motion clips** on the camera's page. The camera then uploads each motion
-clip to reostream, which saves it on your disk, plays it into the presence stream so Frigate
-records the event, and reports it like a wired camera's alerts (`<prefix>/<camera>/motion`,
-and a Frigate event with `frigate_motion = true`). A clip arrives some seconds after the
-motion starts, once the camera has finished recording it.
+Live motion works with nothing to set up. reostream asks the camera once a second whether it
+is asleep; the camera's low-power chip answers without waking it. When the camera's motion
+sensor wakes it to record, reostream sees it within about a second and:
 
-Coming soon: live motion. The camera's low-power chip already says when it wakes for motion,
-without being woken to ask, so reostream will wake the stream the moment motion starts, with
-no extra setup.
+- wakes the stream for 30 seconds, so the presence stream, and Frigate recording it, carries
+  the motion live instead of the last picture
+- reports it like a wired camera's alerts: `<prefix>/<camera>/motion` on MQTT, and a Frigate
+  event with `frigate_motion = true` (both need an `[events]` section)
+
+The camera only needs motion recording on, as it is out of the box. Opening the camera in
+the Reolink app wakes it too, and that looks the same from the network, so it also counts as
+motion. reostream's own sessions (a viewer, the camera page) never do.
+
+To keep the clips themselves, turn on **Auto-save motion clips** on the camera's page. The
+camera then uploads each motion clip to reostream, which saves it on your disk and plays it
+into the presence stream. A clip arrives some seconds after the motion starts, once the
+camera has finished recording it.
 
 #### Always on (constant power only)
 

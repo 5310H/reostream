@@ -59,7 +59,7 @@ const defaultRTSPListen = "0.0.0.0:8561"
 const firstRunLogInterval = 60 * time.Second
 
 // runStopGrace bounds how long shutdown waits for Supervisor.Run to return
-// after its context is cancelled. Run does not return until every stream's
+// after its context is canceled. Run does not return until every stream's
 // stream-stop message has gone out, and that is what releases each camera's
 // session; a shutdown that does not wait for it leaves every camera in the
 // fleet, not just one, refusing its next connection for minutes. Every
@@ -347,7 +347,7 @@ func startup(configFlag, dataDir, listenOverride, rtspListenOverride, controlLis
 		// RegisterOnShutdown runs at the start of Shutdown, before it waits
 		// on active connections, which is exactly when a live log stream
 		// needs to be released: Shutdown blocks on active connections
-		// without cancelling their request contexts, so a long-lived
+		// without canceling their request contexts, so a long-lived
 		// stream needs its own signal to know to stop.
 		controlSrv.RegisterOnShutdown(ctl.Close)
 		go func() {
@@ -497,7 +497,7 @@ func printFirstRun(msg string) {
 
 // firstRunLoop repeats msg every firstRunLogInterval, loud
 // enough that it turns up in `docker logs` without anyone going looking for
-// it, until ctx is cancelled (the daemon is shutting down) or configPath
+// it, until ctx is canceled (the daemon is shutting down) or configPath
 // exists (something -- the setup page, or an operator by hand -- has
 // written a config there). It re-Stats configPath on every tick rather than
 // trusting the absence it saw at startup: an operator can use the open page

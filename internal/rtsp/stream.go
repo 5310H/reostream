@@ -2,7 +2,7 @@
 //
 // It exists for compatibility with software that takes an RTSP URL and
 // nothing else. It is not a replacement for the HTTP MPEG-TS output, which
-// is stateless, self-resynchronising and the more forgiving of the two under
+// is stateless, self-resynchronizing and the more forgiving of the two under
 // a network blip. Both run.
 package rtsp
 
@@ -28,8 +28,8 @@ import (
 // keyframe, for an audio frame to turn up before deciding the camera has no
 // audio.
 //
-// The description is fixed when the server stream is initialised, so
-// initialising on the first keyframe would lock audio out for the life of the
+// The description is fixed when the server stream is initialized, so
+// initializing on the first keyframe would lock audio out for the life of the
 // stream. Waiting forever is equally wrong: a camera with no microphone would
 // never become describable. Cameras that do send AAC interleave it with video
 // continuously, so a frame or two is enough in practice and this is generous.
@@ -40,7 +40,7 @@ const audioProbeFrames = 30
 const rtpClockHz = 90000
 
 // rtpTime converts a camera microsecond reading to RTP clock ticks without
-// regard for the wrap, which is why nothing in the packetising path may use
+// regard for the wrap, which is why nothing in the packetizing path may use
 // it. It survives because it is the arithmetic ts.Clock performs internally
 // and the tests pin it.
 //
@@ -87,7 +87,7 @@ type Stream struct {
 
 	mu      sync.Mutex
 	ready   bool
-	readers int // attached readers, gating packetisation
+	readers int // attached readers, gating packetization
 
 	srv   *gortsplib.Server
 	ss    *gortsplib.ServerStream
@@ -95,7 +95,7 @@ type Stream struct {
 	video *description.Media
 	enc   videoEncoder
 
-	// Held between the first keyframe and initialisation, while waiting to
+	// Held between the first keyframe and initialization, while waiting to
 	// see whether this camera sends audio.
 	pendingKey *baichuan.Frame
 	probed     int
@@ -116,7 +116,7 @@ type Stream struct {
 	// now is the wall clock, replaceable by tests. Nil means time.Now.
 	now func() time.Time
 
-	packetised int
+	packetized int
 
 	// fps is the frame rate from the camera's last info frame, offered in
 	// the description so ffprobe (and Frigate's camera probe) can read it.
@@ -335,7 +335,7 @@ func (s *Stream) Frame(f baichuan.Frame) {
 			s.mu.Unlock()
 		}
 	default:
-		// ADPCM has no RTP mapping worth carrying, and relabelling it as
+		// ADPCM has no RTP mapping worth carrying, and relabeling it as
 		// something else would hand a client bytes it cannot decode.
 	}
 }
@@ -382,7 +382,7 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 
 	if s.readerCount() == 0 {
 		// Nobody is watching. The camera connection is held by the HTTP path
-		// either way, so there is nothing to keep warm by packetising into a
+		// either way, so there is nothing to keep warm by packetizing into a
 		// void.
 		return
 	}
@@ -394,7 +394,7 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 
 	s.mu.Lock()
 	enc, ss, media := s.enc, s.ss, s.video
-	s.packetised++
+	s.packetized++
 	s.mu.Unlock()
 	if enc == nil || ss == nil {
 		return
@@ -412,7 +412,7 @@ func (s *Stream) videoFrame(f baichuan.Frame) {
 	}
 }
 
-// observeVideo advances the pre-initialisation state machine: hold the first
+// observeVideo advances the pre-initialization state machine: hold the first
 // keyframe, then wait a little to see whether audio turns up before fixing
 // the description.
 func (s *Stream) observeVideo(f baichuan.Frame) {
@@ -432,7 +432,7 @@ func (s *Stream) observeVideo(f baichuan.Frame) {
 	s.mu.Unlock()
 
 	if ready {
-		_ = s.initialise(*key)
+		_ = s.initialize(*key)
 	}
 }
 
@@ -456,7 +456,7 @@ func (s *Stream) aacFrame(f baichuan.Frame) {
 		// No video PTS yet to anchor the audio clock to. Emitting now would
 		// count samples from zero while video runs at the camera's clock,
 		// which desyncs the tracks for the life of the session. A stream
-		// initialised by its first audio frame is in this state for a few
+		// initialized by its first audio frame is in this state for a few
 		// milliseconds.
 		return
 	}
@@ -477,7 +477,7 @@ func (s *Stream) aacFrame(f baichuan.Frame) {
 }
 
 // observeAudio records the AAC configuration from the first audio frame, so
-// initialise can offer an audio track.
+// initialize can offer an audio track.
 func (s *Stream) observeAudio(f baichuan.Frame) {
 	s.mu.Lock()
 	have, key := s.audioCfg != nil, s.pendingKey
@@ -496,7 +496,7 @@ func (s *Stream) observeAudio(f baichuan.Frame) {
 
 	// A keyframe already seen means everything needed is now in hand.
 	if key != nil {
-		_ = s.initialise(*key)
+		_ = s.initialize(*key)
 	}
 }
 
@@ -521,9 +521,9 @@ func (s *Stream) audioRTPTime(f baichuan.Frame) uint32 {
 	return uint32((pts90 + s.epoch90) * uint64(cfg.SampleRate) / rtpClockHz)
 }
 
-// initialise builds the description from the parameter sets carried in a
+// initialize builds the description from the parameter sets carried in a
 // keyframe and brings the server stream up.
-func (s *Stream) initialise(f baichuan.Frame) error {
+func (s *Stream) initialize(f baichuan.Frame) error {
 	fmtVideo, err := videoFormat(f)
 	if err != nil {
 		return err
@@ -536,7 +536,7 @@ func (s *Stream) initialise(f baichuan.Frame) error {
 	medias := []*description.Media{media}
 
 	// Audio joins here or not at all: the description is fixed once the
-	// server stream is initialised.
+	// server stream is initialized.
 	s.mu.Lock()
 	audioCfg := s.audioCfg
 	media.FrameRate = float64(s.fps)
@@ -706,7 +706,7 @@ func (s *Stream) refreshParameterSets(f baichuan.Frame) {
 	s.mu.Lock()
 	s.pendingKey = nil
 	s.mu.Unlock()
-	_ = s.initialise(f)
+	_ = s.initialize(f)
 }
 
 // errNoParameterSets means a keyframe arrived without the VPS, SPS or PPS the

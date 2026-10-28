@@ -85,7 +85,7 @@ func main() {
 	}
 
 	out := bufio.NewWriterSize(os.Stdout, 256*1024)
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	var deadline time.Time
 	if *seconds > 0 {
 		deadline = time.Now().Add(time.Duration(*seconds) * time.Second)

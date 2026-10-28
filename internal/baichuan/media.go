@@ -210,10 +210,10 @@ var (
 	magicADPCM  = []byte{0x30, 0x31, 0x77, 0x62}
 )
 
-// Depacketiser reassembles media packets from the byte stream carried in
+// Depacketizer reassembles media packets from the byte stream carried in
 // message id 3. A media packet may straddle message boundaries, so bytes are
 // buffered until a whole packet is present.
-type Depacketiser struct {
+type Depacketizer struct {
 	buf     []byte
 	filler  int
 	skipped int
@@ -221,7 +221,7 @@ type Depacketiser struct {
 	gap     bool
 }
 
-func NewDepacketiser() *Depacketiser { return &Depacketiser{} }
+func NewDepacketizer() *Depacketizer { return &Depacketizer{} }
 
 // Write adds the payload of one message. startsPacket must be true when the
 // message's extension header declared binaryData, which is what marks the
@@ -229,7 +229,7 @@ func NewDepacketiser() *Depacketiser { return &Depacketiser{} }
 // trailing filler from the previous packet's last message and is dropped.
 // The presence of an extension header alone is not the boundary, since some
 // cameras put one on continuation messages too (see Message.StartsPacket).
-func (d *Depacketiser) Write(b []byte, startsPacket bool) {
+func (d *Depacketizer) Write(b []byte, startsPacket bool) {
 	if startsPacket {
 		// A video packet still waiting for its bytes is not filler: it
 		// was cut short, and every frame after it refers to a picture
@@ -247,10 +247,10 @@ func (d *Depacketiser) Write(b []byte, startsPacket bool) {
 }
 
 // Lost reports video packets cut short by the start of the next one.
-func (d *Depacketiser) Lost() int { return d.lost }
+func (d *Depacketizer) Lost() int { return d.lost }
 
 // TakeGap reports whether a video packet was lost since the last call.
-func (d *Depacketiser) TakeGap() bool {
+func (d *Depacketizer) TakeGap() bool {
 	g := d.gap
 	d.gap = false
 	return g
@@ -259,12 +259,12 @@ func (d *Depacketiser) TakeGap() bool {
 // Skipped reports bytes discarded because the buffer did not begin with a
 // packet magic where one was required. It should stay zero; a climbing count
 // means packets are being mis-framed.
-func (d *Depacketiser) Skipped() int { return d.skipped }
+func (d *Depacketizer) Skipped() int { return d.skipped }
 
 // Filler reports bytes dropped between a packet's end and the end of the
 // message carrying it. A healthy stream has a nonzero, slowly growing count:
 // this is the camera's own padding, not a parsing error.
-func (d *Depacketiser) Filler() int { return d.filler }
+func (d *Depacketizer) Filler() int { return d.filler }
 
 // maxFramePrefix bounds the search for the first NAL start code in a media
 // packet. The camera metadata that precedes it has been measured at 80, 104,
@@ -298,7 +298,7 @@ const (
 // an I frame carrying 112 bytes of metadata declares 120.
 //
 // This is the whole corruption problem solved by reading instead of
-// guessing. searchPrefix has to recognise the first NAL by its header bits,
+// guessing. searchPrefix has to recognize the first NAL by its header bits,
 // and a P frame's first NAL is type 1 with any nal_ref_idc -- four byte
 // values that metadata hits by chance about one frame in two thousand.
 // Every such miss both leaks metadata into the picture and cuts the same
@@ -388,7 +388,7 @@ func match(b, magic []byte) bool {
 }
 
 // Next returns the next complete frame, or false if more bytes are needed.
-func (d *Depacketiser) Next() (Frame, bool) {
+func (d *Depacketizer) Next() (Frame, bool) {
 	for {
 		if len(d.buf) < 8 {
 			return Frame{}, false
@@ -502,7 +502,7 @@ func (d *Depacketiser) Next() (Frame, bool) {
 // consume drops a packet of length n. Any bytes left in the buffer afterwards
 // are filler to the end of the message and are dropped when the next packet
 // starts.
-func (d *Depacketiser) consume(n int) { d.buf = d.buf[n:] }
+func (d *Depacketizer) consume(n int) { d.buf = d.buf[n:] }
 
 func trimNul(b []byte) []byte {
 	for i, c := range b {

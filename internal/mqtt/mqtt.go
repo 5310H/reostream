@@ -17,7 +17,7 @@ import (
 )
 
 // Client publishes to a single broker. It is safe for concurrent use; each
-// Publish is serialised. A dropped connection is re-established on the next
+// Publish is serialized. A dropped connection is re-established on the next
 // Publish, so a broker restart heals itself.
 type Client struct {
 	addr     string

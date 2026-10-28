@@ -28,7 +28,7 @@ func captureFrames(t *testing.T) []baichuan.Frame {
 	key := baichuan.AESKey(parseNonce(t, first.XML), "")
 
 	r := baichuan.NewReader(bytes.NewReader(b))
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	var frames []baichuan.Frame
 	for i := 0; ; i++ {
 		msg, err := r.Next()
@@ -60,7 +60,7 @@ func captureFrames(t *testing.T) []baichuan.Frame {
 }
 
 // TestCaptureAudioCarriesNoTimestamp records the wire fact the whole fix
-// rests on, so a future change to the depacketiser that starts producing
+// rests on, so a future change to the depacketizer that starts producing
 // audio timestamps is noticed here rather than being quietly assumed away.
 // The audio packet header is magic(4) size(2) size(2): 8 bytes, with no
 // field for a capture time, unlike the 24 and 32 byte video headers that

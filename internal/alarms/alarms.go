@@ -17,7 +17,7 @@ import (
 // State is what a camera currently reports.
 type State struct {
 	Motion bool
-	// Objects are the AI types the camera names, normalised: person,
+	// Objects are the AI types the camera names, normalized: person,
 	// vehicle, animal, face, package, visitor.
 	Objects []string
 }
@@ -31,7 +31,7 @@ type Change struct {
 	On   bool
 }
 
-func normalise(t string) string {
+func normalize(t string) string {
 	switch strings.ToLower(strings.TrimSpace(t)) {
 	case "people", "person", "human":
 		return "person"
@@ -61,7 +61,7 @@ func stateOf(events []baichuan.AlarmEvent) State {
 			s.Motion = true
 		}
 		for _, t := range e.AI {
-			if n := normalise(t); n != "" && !seen[n] {
+			if n := normalize(t); n != "" && !seen[n] {
 				seen[n] = true
 				s.Objects = append(s.Objects, n)
 			}
@@ -161,6 +161,19 @@ func follow(ctx context.Context, camera string, dial func(context.Context) (*bai
 			if err != nil {
 				continue
 			}
+			// A connection opened for one channel of an NVR or Home Hub
+			// still hears every channel's events; keep this camera's. A
+			// recorder calls itself something other than "ipc" at login,
+			// which is what tells its channel 0 from a camera's own.
+			if ch := conn.Channel(); ch != 0 || isRecorder(conn) {
+				kept := events[:0]
+				for _, e := range events {
+					if e.Channel == ch {
+						kept = append(kept, e)
+					}
+				}
+				events = kept
+			}
 			next := stateOf(events)
 			for _, c := range diff(camera, time.Now(), *cur, next) {
 				fn(c)
@@ -168,4 +181,15 @@ func follow(ctx context.Context, camera string, dial func(context.Context) (*bai
 			*cur = next
 		}
 	}
+}
+
+func isRecorder(conn *baichuan.Conn) bool {
+	di, err := baichuan.ParseDeviceInfo(conn.DeviceInfo())
+	if err != nil {
+		return false
+	}
+	// Cameras say "ipc", "fisheye_ipc" and the like, with typeInfo "IPC";
+	// a recorder says neither.
+	t := strings.ToLower(di.DeviceInfo.Type + " " + di.DeviceInfo.TypeInfo)
+	return strings.TrimSpace(t) != "" && !strings.Contains(t, "ipc")
 }

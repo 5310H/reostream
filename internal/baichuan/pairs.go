@@ -15,7 +15,7 @@ type ConfigPair struct {
 // ConfigPairs returns the read/write pairs in the recovered table.
 //
 // Pairing is on the firmware's exact description, "osd get" to "osd set",
-// rather than on a normalised key. Normalising collapses "osd get" (44) and
+// rather than on a normalized key. Normalizing collapses "osd get" (44) and
 // "get osd" (29) onto one name and pairs 44 with 30, and a write sent to the
 // wrong message id is the one mistake in this package with real consequences.
 //

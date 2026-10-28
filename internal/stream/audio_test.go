@@ -21,7 +21,7 @@ import (
 // fix, wearing different clothes: production had declared an audio role
 // for days while the pipe silently dropped every audio frame. This test
 // runs against a fake camera replaying a real capture known to contain 56
-// AAC frames (internal/baichuan's own TestDepacketiserOnH265Capture
+// AAC frames (internal/baichuan's own TestDepacketizerOnH265Capture
 // reports audio=56), collects everything Run publishes, and hands it to
 // ffprobe to prove the audio track is not just present in the PMT but
 // actually decodable.
@@ -53,7 +53,7 @@ func TestRunCarriesAudioFromTheCameraToTheHub(t *testing.T) {
 	// has not been told to stop (see fakecam.Camera.serve): there is no EOF
 	// or channel close marking "the fixture is done" to wait on. An idle
 	// gap on ch is the signal instead: once frames stop arriving for a
-	// while, the fixture has been fully depacketised and muxed, so cancel
+	// while, the fixture has been fully depacketized and muxed, so cancel
 	// the context to end Run and stop the fake camera's connection.
 	const idleGap = 500 * time.Millisecond
 	idle := time.NewTimer(idleGap)

@@ -32,7 +32,7 @@ func TestConfidenceLabels(t *testing.T) {
 	for _, tc := range cases {
 		got := confidenceOf(baichuan.ConfigPair{Set: tc.set, Name: tc.name})
 		if got != tc.want {
-			t.Fatalf("%s (%d) labelled %q, want %q", tc.name, tc.set, got, tc.want)
+			t.Fatalf("%s (%d) labeled %q, want %q", tc.name, tc.set, got, tc.want)
 		}
 	}
 }
@@ -43,7 +43,7 @@ func TestUnsafeToRewriteBeatsUnverified(t *testing.T) {
 	// "nobody has tested this", so it wins.
 	//
 	// The names below must resolve through baichuan.ConfigMessages, which is
-	// keyed by normalised block name ("enc", "isp"), not by the firmware's
+	// keyed by normalized block name ("enc", "isp"), not by the firmware's
 	// set-message wording ("set enc", "isp set"). A test that only skips
 	// unresolved names and never checks whether any resolved at all would
 	// pass having asserted nothing; resolved tracks that so this test fails
@@ -72,7 +72,7 @@ func TestUnsafeToRewriteBeatsUnverified(t *testing.T) {
 			}
 			matched++
 			if got := confidenceOf(pair); got != UnsafeToRewrite {
-				t.Fatalf("%s (get %d, set %d) labelled %q", pair.Name, pair.Get, pair.Set, got)
+				t.Fatalf("%s (get %d, set %d) labeled %q", pair.Name, pair.Get, pair.Set, got)
 			}
 		}
 	}

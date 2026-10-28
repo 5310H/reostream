@@ -43,6 +43,7 @@
 <button type="button" data-view="cards">Cards</button>
 <button type="button" data-view="list">List</button>
 </div>
+<button type="button" class="fleet-arrange" aria-pressed="false" title="Drag the cameras into the order you want">Arrange</button>
 <span class="fc-label fc-show">Show</span>
 <div class="fleet-show" role="group" aria-label="What to show on each camera">
 <button type="button" data-show="name">Name</button>
@@ -146,6 +147,85 @@
     lsSet('reostream.fleetHidden', hidden.join(','));
     applyShow();
   });
+
+  // Card order is the order of the cameras in the config file, so it is
+  // the same in every browser and on the Wall and the sidebar. Arrange
+  // makes the cards draggable by mouse or finger; while it is on, nothing
+  // inside a card takes a click, so a drag never opens or plays one. Done
+  // saves the new order and reloads, which brings the sidebar along.
+  function cards() { return Array.prototype.slice.call(fleet.querySelectorAll('.camcard')); }
+  function currentOrder() { return cards().map(function (c) { return c.dataset.camera; }).join(','); }
+
+  var arrange = document.querySelector('.fleet-arrange');
+  var drag = null, lastX = 0, lastY = 0, edge = 0, before = '';
+  if (arrange) arrange.addEventListener('click', function () {
+    var on = !fleet.classList.contains('arranging');
+    if (on) {
+      before = currentOrder();
+    } else if (currentOrder() !== before) {
+      arrange.disabled = true;
+      arrange.textContent = 'Saving';
+      fetch('/fleet/order', { method: 'POST', body: new URLSearchParams({ order: currentOrder() }) })
+        .then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+          location.reload();
+        })
+        .catch(function (e) {
+          arrange.disabled = false;
+          arrange.textContent = 'Done';
+          alert('The new order was not saved: ' + e.message);
+        });
+      return;
+    }
+    fleet.classList.toggle('arranging', on);
+    arrange.setAttribute('aria-pressed', on ? 'true' : 'false');
+    arrange.textContent = on ? 'Done' : 'Arrange';
+  });
+  fleet.addEventListener('pointerdown', function (e) {
+    if (!fleet.classList.contains('arranging')) return;
+    var c = e.target.closest('.camcard');
+    if (!c) return;
+    e.preventDefault();
+    drag = c;
+    drag.classList.add('dragging');
+    fleet.setPointerCapture(e.pointerId);
+    edge = setInterval(scrollAtEdge, 16);
+  });
+  // Held near the top or bottom of the window, the page scrolls, so a card
+  // can go to a place that is off screen (a phone shows one or two).
+  function scrollAtEdge() {
+    var zone = 70, h = window.innerHeight, dy = 0;
+    if (lastY < zone) dy = -Math.ceil((zone - lastY) / 5);
+    else if (lastY > h - zone) dy = Math.ceil((lastY - (h - zone)) / 5);
+    if (dy) { window.scrollBy(0, dy); place(lastX, lastY); }
+  }
+  fleet.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    lastX = e.clientX; lastY = e.clientY;
+    place(lastX, lastY);
+  });
+  function place(x, y) {
+    var el = document.elementFromPoint(x, y);
+    var over = el && el.closest('.camcard');
+    if (!over || over === drag || over.parentNode !== fleet) return;
+    var r = over.getBoundingClientRect();
+    // One card per row (List, or Cards on a phone): above or below the
+    // middle; otherwise left or right of it.
+    var oneColumn = fleet.classList.contains('view-list') ||
+      getComputedStyle(fleet).gridTemplateColumns.split(' ').length === 1;
+    var after = oneColumn
+      ? y > r.top + r.height / 2
+      : x > r.left + r.width / 2;
+    fleet.insertBefore(drag, after ? over.nextSibling : over);
+  }
+  function drop() {
+    if (!drag) return;
+    clearInterval(edge);
+    drag.classList.remove('dragging');
+    drag = null;
+  }
+  fleet.addEventListener('pointerup', drop);
+  fleet.addEventListener('pointercancel', drop);
 })();
 </script>
 <script src="/assets/mpegts.js"></script>

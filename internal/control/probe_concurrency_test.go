@@ -9,7 +9,7 @@ import (
 // TestBeginProbeRefusesASecondConcurrentClaim is the guard itself: two
 // browser tabs, a double click, or a browser retry can each reach
 // probeGuarded for the same unconfigured address before either has
-// returned, and nothing about an HTTP handler in Go serialises that on its
+// returned, and nothing about an HTTP handler in Go serializes that on its
 // own.
 func TestBeginProbeRefusesASecondConcurrentClaim(t *testing.T) {
 	s := newTestServer(t, Options{})
@@ -26,7 +26,7 @@ func TestBeginProbeRefusesASecondConcurrentClaim(t *testing.T) {
 }
 
 // TestBeginProbeDoesNotBlockADifferentAddress proves the guard is scoped
-// per address, not a single global lock that would serialise unrelated
+// per address, not a single global lock that would serialize unrelated
 // cameras' setup probes.
 func TestBeginProbeDoesNotBlockADifferentAddress(t *testing.T) {
 	s := newTestServer(t, Options{})

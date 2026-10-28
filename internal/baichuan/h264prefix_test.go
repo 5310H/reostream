@@ -25,7 +25,7 @@ func TestPFrameH264SkipsFalseStartCodeInPrefix(t *testing.T) {
 		binary.LittleEndian.PutUint32(buf[8:12], uint32(len(picture)))
 		buf = append(buf, body...)
 
-		var d Depacketiser
+		var d Depacketizer
 		d.Write(buf, true)
 		f, ok := d.Next()
 		if !ok {

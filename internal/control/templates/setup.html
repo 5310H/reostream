@@ -118,9 +118,11 @@ document.addEventListener('click', async function (e) {
   var addr = card.dataset.address;
   var passField = card.querySelector('.cam-pass');
   var typed = passField ? passField.value : '';
+  var userField = card.querySelector('.cam-user');
+  var user = (userField && userField.value.trim()) || 'admin';
   var body = new URLSearchParams();
   body.set('address', addr);
-  body.set('username', 'admin');
+  body.set('username', user);
   body.set('password', typed);
   button.disabled = true;
   var was = button.textContent;
@@ -135,8 +137,10 @@ document.addEventListener('click', async function (e) {
     // has no such field and this is a no-op, leaving them to try again.
     var fresh = discoverResult.querySelector('.found-camera[data-address="' + addr + '"]');
     if (fresh) {
-      var hidden = fresh.querySelector('input[name="password.' + addr + '"]');
-      if (hidden) hidden.value = typed;
+      // Prefix match: an NVR's card carries one pair per channel, named
+      // "password.<address>#<channel>".
+      fresh.querySelectorAll('input[name^="password.' + addr + '"]').forEach(function (h) { h.value = typed; });
+      fresh.querySelectorAll('input[name^="username.' + addr + '"]').forEach(function (h) { h.value = user; });
     }
   } catch (err) {
     button.disabled = false;

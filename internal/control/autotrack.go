@@ -45,9 +45,9 @@ type autoTrackView struct {
 
 // readAutoTrack returns the view and the camera's own document, which a
 // write echoes back.
-func readAutoTrack(ctx context.Context, c *cgi.Client) (autoTrackView, map[string]any, error) {
+func readAutoTrack(ctx context.Context, c *cgi.Client, channel int) (autoTrackView, map[string]any, error) {
 	var v autoTrackView
-	value, _, rng, err := c.Get(ctx, "GetAiCfg", 0)
+	value, _, rng, err := c.Get(ctx, "GetAiCfg", channel)
 	if err != nil {
 		return v, nil, err
 	}
@@ -102,7 +102,7 @@ func (s *Server) readAutoTrackView(ctx context.Context, cam Camera) autoTrackVie
 		return autoTrackView{Err: fmt.Sprintf("could not connect: %v", err)}
 	}
 	defer c.Close()
-	v, _, err := readAutoTrack(ctx, c)
+	v, _, err := readAutoTrack(ctx, c, cam.Channel)
 	if err != nil {
 		// Most cameras have no tracking at all; only say so when the
 		// read failed for some other reason than not having it.
@@ -133,7 +133,7 @@ func (s *Server) serveApplyAutoTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer c.Close()
-	_, doc, err := readAutoTrack(ctx, c)
+	_, doc, err := readAutoTrack(ctx, c, cam.Channel)
 	if err != nil {
 		fail(err.Error())
 		return
@@ -185,7 +185,7 @@ func (s *Server) serveApplyAutoTrack(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error())
 		return
 	}
-	_, after, err := readAutoTrack(ctx, c)
+	_, after, err := readAutoTrack(ctx, c, cam.Channel)
 	if err != nil {
 		fail("was sent but could not be read back: " + err.Error())
 		return

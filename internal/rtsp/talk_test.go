@@ -277,3 +277,76 @@ func TestRepeatedBackChannelSetupIsAccepted(t *testing.T) {
 		t.Fatalf("repeated SETUP of the back channel answered %d, want 200", s)
 	}
 }
+
+// 16 bit PCM at 16 kHz, which go2rtc sends as "PCM", reaches the camera at
+// 16 kHz rather than being squeezed through G.711's 8.
+func TestBackChannelTakes16kPCM(t *testing.T) {
+	frames := captureFrames(t)
+	srv, st := serverWithStream(t, "cam")
+	ft := &fakeTalker{}
+	st.SetTalker(ft)
+	st.SetSpeaker(true)
+	feedUntilReady(t, st, frames)
+
+	c, desc := describeWith(t, srv.Addr(), "cam", true)
+	var medi *description.Media
+	var l *format.LPCM
+	for _, m := range desc.Medias {
+		if !m.IsBackChannel {
+			continue
+		}
+		for _, f := range m.Formats {
+			if lf, ok := f.(*format.LPCM); ok && lf.SampleRate == 16000 && lf.BitDepth == 16 {
+				medi, l = m, lf
+			}
+		}
+	}
+	if medi == nil {
+		t.Fatal("no 16 kHz L16 back channel offered")
+	}
+	if err := c.SetupAll(desc.BaseURL, desc.Medias); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if _, err := c.Play(nil); err != nil {
+		t.Fatalf("play: %v", err)
+	}
+	enc, err := l.CreateEncoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 20 ms at 16 kHz is 320 samples, big endian on the wire.
+	pcm := make([]byte, 640)
+	for i := 0; i < len(pcm); i += 2 {
+		pcm[i], pcm[i+1] = 0x10, 0x00
+	}
+	for i := 0; i < 25; i++ {
+		pkts, err := enc.Encode(pcm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range pkts {
+			p.Timestamp = uint32(i * 320)
+			if err := c.WritePacketRTP(medi, p); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, n, _, _ := ft.snapshot(); n >= 25*320 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_, _, n, rates, first := ft.snapshot()
+	if n < 25*320 {
+		t.Fatalf("camera saw %d samples, want %d", n, 25*320)
+	}
+	if !rates[16000] || len(rates) != 1 {
+		t.Errorf("rates %v, want only 16000", rates)
+	}
+	if first != 4096 {
+		t.Errorf("first sample %d, want 4096 exactly: L16 is lossless", first)
+	}
+}

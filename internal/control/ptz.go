@@ -83,21 +83,16 @@ func (s *Server) readGuard(ctx context.Context, cam Camera) ptzView {
 	return v
 }
 
-// ptzConn dials for one PTZ command and writes the failure as the answer.
-func (s *Server) ptzConn(w http.ResponseWriter, r *http.Request) (*baichuan.Conn, context.CancelFunc, bool) {
+// ptzCam finds the camera a PTZ command is for and bounds the command,
+// writing the failure as the answer.
+func (s *Server) ptzCam(w http.ResponseWriter, r *http.Request) (Camera, context.Context, context.CancelFunc, bool) {
 	cam, err := s.byName(r.PathValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
-		return nil, nil, false
+		return Camera{}, nil, nil, false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), readTimeout*2)
-	conn, err := s.dial(ctx, cam)
-	if err != nil {
-		cancel()
-		http.Error(w, "could not connect: "+err.Error(), http.StatusBadGateway)
-		return nil, nil, false
-	}
-	return conn, cancel, true
+	return cam, ctx, cancel, true
 }
 
 // serveApplyPtz moves or stops the camera for the Live tab's pad. It is a
@@ -115,13 +110,14 @@ func (s *Server) serveApplyPtz(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.FormValue("speed")); err == nil {
 		speed = min(max(v, ptzSpeedMin), ptzSpeedMax)
 	}
-	conn, cancel, ok := s.ptzConn(w, r)
+	cam, ctx, cancel, ok := s.ptzCam(w, r)
 	if !ok {
 		return
 	}
 	defer cancel()
-	defer conn.Close()
-	if err := conn.PtzControl(r.Context(), cmd, speed); err != nil {
+	if err := s.withPtzConn(ctx, cam, func(conn *baichuan.Conn) error {
+		return conn.PtzControl(ctx, cmd, speed)
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -149,13 +145,14 @@ func (s *Server) serveApplyPreset(w http.ResponseWriter, r *http.Request) {
 	if len(name) > 32 {
 		name = name[:32]
 	}
-	conn, cancel, ok := s.ptzConn(w, r)
+	cam, ctx, cancel, ok := s.ptzCam(w, r)
 	if !ok {
 		return
 	}
 	defer cancel()
-	defer conn.Close()
-	if err := conn.PtzPreset(r.Context(), cmd, id, name); err != nil {
+	if err := s.withPtzConn(ctx, cam, func(conn *baichuan.Conn) error {
+		return conn.PtzPreset(ctx, cmd, id, name)
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -267,7 +264,7 @@ func (s *Server) serveGuardPosition(w http.ResponseWriter, r *http.Request) {
 	}
 	back := "/cameras/" + url.PathEscape(cam.Name) + "/settings/ptz"
 	op := r.FormValue("op")
-	param := map[string]any{"channel": 0}
+	param := map[string]any{"channel": cam.Channel}
 	what := ""
 	switch op {
 	case "set":
@@ -284,8 +281,9 @@ func (s *Server) serveGuardPosition(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	c, err := s.cgiDial(cam)
 	if err == nil {
+		defer c.Close()
 		// Keep the camera's own enable and timeout in the same write.
-		if value, _, _, gerr := c.Get(ctx, "GetPtzGuard", 0); gerr == nil {
+		if value, _, _, gerr := c.Get(ctx, "GetPtzGuard", cam.Channel); gerr == nil {
 			var cur struct {
 				PtzGuard map[string]any `json:"PtzGuard"`
 			}

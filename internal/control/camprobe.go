@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/VoltTech21/reostream/internal/baichuan"
+	"github.com/VoltTech21/reostream/internal/config"
 )
 
 // cameraProbeTimeout bounds one whole camera probe: baichuan.ConfigNames lists
@@ -72,7 +74,7 @@ func (s *Server) dial(ctx context.Context, cam Camera) (*baichuan.Conn, error) {
 	// timeout, and a page dials several times: 16 s for a camera's page,
 	// 48 s for Advanced. One timeout is enough to know; for silentFor
 	// after it the page's dials fail at once instead.
-	key := cam.Address + "/" + cam.UID
+	key := fmt.Sprintf("%s/%s/%d", cam.Address, cam.UID, cam.Channel)
 	s.silentMu.Lock()
 	until := s.silentUntil[key]
 	s.silentMu.Unlock()
@@ -91,6 +93,9 @@ func (s *Server) dial(ctx context.Context, cam Camera) (*baichuan.Conn, error) {
 		defer cancel()
 	}
 	conn, err := s.dialCamera(ctx, cam)
+	if err == nil {
+		s.noteRecorder(cam.Address, conn)
+	}
 	s.silentMu.Lock()
 	defer s.silentMu.Unlock()
 	switch {
@@ -126,6 +131,7 @@ func (s *Server) dialCamera(ctx context.Context, cam Camera) (*baichuan.Conn, er
 		Username: cam.Username,
 		Password: cam.Password,
 		UID:      cam.UID,
+		Channel:  cam.Channel,
 	})
 }
 
@@ -196,4 +202,56 @@ func (s *Server) probeCamera(ctx context.Context, cam Camera) ([]BlockProbe, err
 		out = append(out, newBlockProbe(name, id, status, xml))
 	}
 	return out, nil
+}
+
+// isRecorderConn reports whether conn reached an NVR or Home Hub: every
+// camera has "ipc" in its type at login, and a recorder does not.
+func isRecorderConn(conn *baichuan.Conn) bool {
+	if conn == nil {
+		return false
+	}
+	di, err := baichuan.ParseDeviceInfo(conn.DeviceInfo())
+	if err != nil {
+		return false
+	}
+	// Cameras say "ipc", "fisheye_ipc" and the like, with typeInfo "IPC";
+	// a recorder says neither.
+	t := strings.ToLower(di.DeviceInfo.Type + " " + di.DeviceInfo.TypeInfo)
+	return strings.TrimSpace(t) != "" && !strings.Contains(t, "ipc")
+}
+
+func (s *Server) noteRecorder(addr string, conn *baichuan.Conn) {
+	rec := isRecorderConn(conn)
+	s.recorderMu.Lock()
+	defer s.recorderMu.Unlock()
+	if s.recorders == nil {
+		s.recorders = map[string]bool{}
+	}
+	s.recorders[config.NormalizeAddr(addr)] = rec
+}
+
+// behindRecorder reports whether cam is reached through an NVR or Home
+// Hub. A channel other than 0 says so outright; channel 0 is a recorder's
+// first camera as often as a camera on its own, so for that one it is
+// what the address said it was the last time it was dialled, dialling
+// once to find out if it never has been.
+func (s *Server) behindRecorder(ctx context.Context, cam Camera) bool {
+	if cam.Channel != 0 {
+		return true
+	}
+	key := config.NormalizeAddr(cam.Address)
+	s.recorderMu.Lock()
+	rec, known := s.recorders[key]
+	s.recorderMu.Unlock()
+	if known {
+		return rec
+	}
+	conn, err := s.dial(ctx, cam)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	s.recorderMu.Lock()
+	defer s.recorderMu.Unlock()
+	return s.recorders[key]
 }

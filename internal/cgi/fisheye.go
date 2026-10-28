@@ -65,7 +65,7 @@ func (c *Client) GetFishEye(ctx context.Context, channel int) (FishEye, error) {
 // waiting it out; poll until the camera answers.
 //
 // It also invalidates any motion mask or detection zone drawn against the
-// previous geometry, because those coordinates are normalised to the frame.
+// previous geometry, because those coordinates are normalized to the frame.
 // A fisheye with zones drawn on the circular view will have them pointing at
 // the wrong places after a switch to quad or dual.
 func (c *Client) SetFishEye(ctx context.Context, channel int, f FishEye) error {

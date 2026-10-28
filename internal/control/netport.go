@@ -65,7 +65,7 @@ func (s *Server) readNetPort(ctx context.Context, cam Camera) netPortView {
 
 // serveApplyNetPort switches one service on or off, or moves its port.
 func (s *Server) serveApplyNetPort(w http.ResponseWriter, r *http.Request) {
-	cam, err := s.byName(r.PathValue("name"))
+	cam, err := s.byNameDirect(r.PathValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

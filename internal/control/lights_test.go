@@ -50,7 +50,7 @@ func loginReply(token string) string {
 // reached it, not just what the handler claims. The SetWhiteLed handler
 // fails the test itself if bright arrives as anything but the value
 // GetWhiteLed reported, the same discipline fakeClockCamera's SetTime
-// handler already applies to "year" in applyall_test.go: an unmodelled
+// handler already applies to "year" in applyall_test.go: an unmodeled
 // field surviving the round trip is the thing under test, not a value this
 // test reads back afterward.
 type fakeCGICamera struct {
@@ -60,7 +60,7 @@ type fakeCGICamera struct {
 	sets  int32
 }
 
-// fakeCGICameraBright is the unmodelled field value newFakeCGICamera seeds
+// fakeCGICameraBright is the unmodeled field value newFakeCGICamera seeds
 // GetWhiteLed with, and every SetWhiteLed must echo back unchanged.
 const fakeCGICameraBright = 66
 
@@ -197,7 +197,7 @@ func TestServeApplyFloodlightRefusesAnUnknownOption(t *testing.T) {
 		t.Fatalf("got %d, want 400", resp.StatusCode)
 	}
 	if dialed {
-		t.Fatal("an unrecognised option must be refused before dialing the camera")
+		t.Fatal("an unrecognized option must be refused before dialing the camera")
 	}
 }
 
@@ -317,7 +317,7 @@ func TestSetFloodlightPreservesEveryOtherField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := setFloodlight(context.Background(), c, 1, 1); err != nil {
+	if err := setFloodlight(context.Background(), c, 0, 1, 1); err != nil {
 		t.Fatalf("setFloodlight: %v", err)
 	}
 	if atomic.LoadInt32(&cam.sets) != 1 {

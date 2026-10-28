@@ -111,7 +111,7 @@ func TestNonSessionErrorIsNotRetried(t *testing.T) {
 	}
 }
 
-// TestGetHonoursContextCancellation proves a caller's own deadline actually
+// TestGetHonorsContextCancellation proves a caller's own deadline actually
 // aborts a call in flight, not just the gap between calls: against a
 // handler that never answers, Get must return once ctx expires rather than
 // waiting out the Client's own 20 second http.Client timeout. This is the
@@ -119,7 +119,7 @@ func TestNonSessionErrorIsNotRetried(t *testing.T) {
 // to the *http.Request) would fail: such code would still block until the
 // handler answers or the http.Client timeout fires, long past ctx's own
 // deadline.
-func TestGetHonoursContextCancellation(t *testing.T) {
+func TestGetHonorsContextCancellation(t *testing.T) {
 	unblock := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("cmd") == "Login" {
@@ -152,7 +152,7 @@ func TestGetHonoursContextCancellation(t *testing.T) {
 		t.Fatalf("err = %v, want it to wrap context.DeadlineExceeded", err)
 	}
 	if elapsed > 5*time.Second {
-		t.Fatalf("Get took %v to return after a 50ms context deadline; the request was not actually cancelled", elapsed)
+		t.Fatalf("Get took %v to return after a 50ms context deadline; the request was not actually canceled", elapsed)
 	}
 }
 

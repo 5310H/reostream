@@ -15,7 +15,7 @@ import (
 
 // Reloader applies a new camera list to the running fleet. An interface so
 // this package does not import the supervisor's construction, only its
-// behaviour.
+// behavior.
 type Reloader interface {
 	Reload(cams []config.Camera) (supervisor.ReloadResult, error)
 

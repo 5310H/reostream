@@ -251,7 +251,7 @@ func (s *Server) settleClaim() bool {
 //     vocabulary. Under the old rate that fell in six DAYS, which is why
 //     the floor was 16 and why this screen stopped recommending it. At 50 a
 //     second the same three words last about five years.
-//   - Twelve characters a person invents is in that same neighbourhood,
+//   - Twelve characters a person invents is in that same neighborhood,
 //     which is where the new floor comes from.
 //
 // Be honest about what a length rule does and does not buy: twelve
@@ -588,7 +588,7 @@ func (s *Server) serveClaim(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		// Live, under the write lock every request's auth read takes, so
 		// the next request through the wrapper is challenged. No restart.
-		// The token is spent in the same breath: it exists to authorise
+		// The token is spent in the same breath: it exists to authorize
 		// exactly one claim, and this was it.
 		s.authMu.Lock()
 		s.auth.Password = password

@@ -41,7 +41,7 @@ import (
 //
 // Port and Interval exist on the wire and this code offers no control for
 // either: composing a SetNtp body from a struct that only knows Server and
-// Enable would send zeros for every field this code has never modelled,
+// Enable would send zeros for every field this code has never modeled,
 // exactly the mistake setField's own comment in settings.go warns against
 // for XML. setNTP changes only server and enable on top of whatever this
 // returns, never the whole document.
@@ -82,7 +82,7 @@ func ntpEnableServer(doc map[string]any) (enabled bool, server string) {
 // It is the DISPLAY read that is narrow, not the write. setTimeZone reads
 // the whole GetTime document back through readFullTime and changes one key
 // on top of it, because composing a SetTime body out of this struct would
-// send zeros for every clock field this code has never modelled. See
+// send zeros for every clock field this code has never modeled. See
 // readFullTime and setTimeZone below.
 type deviceTimeZone struct {
 	TimeZone int `json:"timeZone"`
@@ -240,7 +240,7 @@ func (s *Server) setNTP(ctx context.Context, cam Camera, server string, enabled 
 // day, hour, minute, second, and more, most of them a sample rather than a
 // setting. setTimeZone changes only one key on top of whatever this
 // returns; composing a SetTime body from a struct that only knows about
-// timeZone would send zeros for every field this code has never modelled,
+// timeZone would send zeros for every field this code has never modeled,
 // exactly the mistake setField's own comment in settings.go warns against
 // for XML, and setNTP already avoids for Port and Interval.
 func readFullTime(ctx context.Context, c *cgi.Client) (map[string]any, error) {
@@ -436,7 +436,7 @@ func (s *Server) readTimePage(ctx context.Context, cam Camera) timePage {
 // same way, and a name that is not in the config is the same answer for
 // all three.
 func (s *Server) timeCamera(w http.ResponseWriter, r *http.Request) (Camera, bool) {
-	cam, err := s.byName(r.PathValue("name"))
+	cam, err := s.byNameDirect(r.PathValue("name"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return Camera{}, false

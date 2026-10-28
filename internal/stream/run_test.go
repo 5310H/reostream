@@ -81,7 +81,7 @@ func TestRunAgainstAFakeCamera(t *testing.T) {
 		t.Errorf("PMT stream_type = %#x, want %#x (HEVC)", got, ts.StreamTypeHEVC)
 	}
 
-	// The connection is closed when the context is cancelled: Run must
+	// The connection is closed when the context is canceled: Run must
 	// return promptly with ctx.Err(), and the fake camera's side of the
 	// connection must run to completion (fakecam.Camera.serve only counts a
 	// connection once the peer, this package's conn.Close, has closed it).
@@ -92,7 +92,7 @@ func TestRunAgainstAFakeCamera(t *testing.T) {
 			t.Errorf("Run returned %v, want context.Canceled", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return after the context was cancelled")
+		t.Fatal("Run did not return after the context was canceled")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)

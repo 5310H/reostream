@@ -47,7 +47,7 @@ func TestTheStatedPrefixBeatsASearchThatMetadataFools(t *testing.T) {
 		t.Fatalf("searchPrefix = %d, want 4; this test no longer exercises a search the metadata fools", got)
 	}
 
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	d.Write(pkt, true)
 	f, ok := d.Next()
 	if !ok {
@@ -80,7 +80,7 @@ func TestAnUnusableStatedPrefixFallsBackToTheSearch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkt := buildPrefixedFrame(magicIFrame, 32, "H264", tc.stated, meta, picture)
-			d := NewDepacketiser()
+			d := NewDepacketizer()
 			d.Write(pkt, true)
 			f, ok := d.Next()
 			if !ok {
@@ -94,7 +94,7 @@ func TestAnUnusableStatedPrefixFallsBackToTheSearch(t *testing.T) {
 }
 
 // forEachPacket replays a capture and hands over each media packet as it sat
-// in the depacketiser's buffer: one packet, plus whatever filler the camera
+// in the depacketizer's buffer: one packet, plus whatever filler the camera
 // left after it, since a message that starts a packet discards the rest.
 func forEachPacket(t *testing.T, name string, fn func(buf []byte, hdr int, codec string, kind FrameKind)) {
 	t.Helper()

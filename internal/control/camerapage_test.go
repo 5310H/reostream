@@ -220,7 +220,7 @@ func (c *cgiFloodlightCamera) addr() string { return strings.TrimPrefix(c.srv.UR
 // pairGetID finds the message id for a read's firmware description (e.g.
 // "osd get"), the same lookup settings.go's own unexported pairForName
 // does over baichuan.ConfigPairs, which is unreachable from this package.
-// ConfigMessages is keyed by a normalised name ("osd2", not "osd get"), so
+// ConfigMessages is keyed by a normalized name ("osd2", not "osd get"), so
 // that map is the wrong lookup here.
 func pairGetID(t *testing.T, name string) uint32 {
 	t.Helper()

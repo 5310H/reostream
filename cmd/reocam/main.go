@@ -221,7 +221,7 @@ var talkRate *int
 // Nothing in the protocol confirms a camera actually made a sound: it
 // acknowledges the session, accepts every packet, and reports no error either
 // way. Two separate bugs here passed all of that while playing silence. To
-// check, listen to the camera's own audio stream, and to a neighbour's.
+// check, listen to the camera's own audio stream, and to a neighbor's.
 //
 // A camera with no speaker is worse than useless here rather than harmlessly
 // inert: it answers TalkAbility with a full format, accepts one TalkConfig

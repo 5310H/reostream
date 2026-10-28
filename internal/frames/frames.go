@@ -22,7 +22,7 @@
 //	14  u32       payload length
 //	18  u16       server send time, milliseconds since the epoch mod 65536
 //
-// The send time lets a client with a synchronised clock measure the
+// The send time lets a client with a synchronized clock measure the
 // server-to-screen leg on its own, without a round trip and without
 // trusting the camera's clock. It wraps every 65.5 seconds, which is far
 // longer than any latency worth measuring.

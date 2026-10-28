@@ -12,7 +12,7 @@ import (
 // physical measurement and the moves are offsets, and they correct different
 // errors:
 //
-// The lenses sit a few centimetres apart, so in the region where their views
+// The lenses sit a few centimeters apart, so in the region where their views
 // overlap an object appears in a different place in each image by an amount
 // that depends on how far away it is. Near objects shift a lot, distant ones
 // barely. No single alignment is therefore correct for a whole scene: a seam

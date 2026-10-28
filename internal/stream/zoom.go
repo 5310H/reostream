@@ -36,7 +36,7 @@ func baichuanZoomInfo(ctx context.Context, address, username, password string) (
 	if err := startZoom(conn, "zoom"); err != nil {
 		return "", 0, 0, err
 	}
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	width, height := 0, 0
 	for {
 		select {

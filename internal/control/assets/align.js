@@ -31,7 +31,7 @@
   // which is far too small to judge.
   var zoom = 1;
 
-  // How far the crop has been dragged from centre, in SOURCE pixels, and
+  // How far the crop has been dragged from center, in SOURCE pixels, and
   // the scale the last frame was drawn at so a drag in canvas pixels can be
   // converted back.
   var panX = 0, panY = 0, lastScale = 1;
@@ -96,13 +96,13 @@
     }
     var W = canvas.width, H = canvas.height;
 
-    // Source rectangle: the whole frame at zoom 1, a band centred on the
+    // Source rectangle: the whole frame at zoom 1, a band centered on the
     // seam as it goes up.
     var sw = vw / zoom, sh = vh / zoom;
-    // Centred, then moved by however far the picture has been dragged, and
+    // Centered, then moved by however far the picture has been dragged, and
     // clamped so the crop can never leave the frame. Without the pan a zoom
     // could only ever show the middle: the seam runs the full height of the
-    // picture, and the interesting part of it is rarely dead centre.
+    // picture, and the interesting part of it is rarely dead center.
     var maxX = vw - sw, maxY = vh - sh;
     var sx = Math.max(0, Math.min(maxX, (vw - sw) / 2 + panX));
     var sy = Math.max(0, Math.min(maxY, (vh - sh) / 2 + panY));
@@ -126,7 +126,7 @@
     if (showGuide) {
       // The seam is at the middle of the FRAME, not the middle of the
       // canvas. Those are the same place only while the picture is
-      // centred, so the line is mapped through the crop: without this it
+      // centered, so the line is mapped through the crop: without this it
       // stays put on screen while the picture slides out from under it,
       // and panning to look at one end of the seam leaves the guide
       // marking nothing.

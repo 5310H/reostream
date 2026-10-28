@@ -65,6 +65,14 @@ type Field struct {
 	// minus what is entered, matching the Reolink app.
 	Invert int
 
+	// Min and Max are a number field's range as the page shows it (after
+	// Invert), when it is known. The slider is held to it and a value
+	// outside it is refused before anything is sent: the camera does not
+	// say its ranges, and it took a motion sensitivity of -16 and a volume
+	// of 116 when the slider ran 0 to 255 for everything (click test,
+	// 10-27). Max 0 means the range is not known.
+	Min, Max int
+
 	// Also lists further elements a toggle sets to the same value in the
 	// same write: record audio is one switch, but the main and the sub
 	// stream each carry their own <audio>.
@@ -116,6 +124,15 @@ func (f Field) shown(stored string) string {
 
 // stored is the value written for one entered on the page.
 func (f Field) stored(entered string) (string, error) {
+	if f.Kind == "number" && f.Max > 0 {
+		n, err := strconv.Atoi(strings.TrimSpace(entered))
+		if err != nil {
+			return "", fmt.Errorf("%s takes a whole number, not %q", f.Label, entered)
+		}
+		if n < f.Min || n > f.Max {
+			return "", fmt.Errorf("%s goes from %d to %d, not %d", f.Label, f.Min, f.Max, n)
+		}
+	}
 	if f.Invert == 0 {
 		return entered, nil
 	}
@@ -153,7 +170,7 @@ func (f Field) FormXPath() string {
 // gives it ("osd get", "get osd"), most preferred first. More than one
 // candidate exists only for OSD: docs/control.md records "osd get" (44) and
 // "get osd" (29) as two independently recovered pairs for the same
-// settings, and normalising them onto one name is what pairs a write to the
+// settings, and normalizing them onto one name is what pairs a write to the
 // wrong message id (see ConfigPairs' own comment). Which one a given camera
 // actually implements is not assumed; resolveGroupBlock discovers it by
 // trying each candidate and taking the first that reads back 200.
@@ -187,13 +204,17 @@ type Group struct {
 	// block, rather than listing every field as not available: a spotlight
 	// or AI noise reduction is something a model has or has not.
 	Optional bool
+	// NeedsFloodlight hides the group on a camera whose Support block says
+	// it has no light. Answering the block is no proof: an RLC-810A, which
+	// has no spotlight, answers floodlight task get with a full document.
+	NeedsFloodlight bool
 	// Untested marks a group whose fields were read off a real camera but
 	// whose writes nobody has yet watched take effect on one. It shows as
 	// the hollow dot, the redesign's fourth tier.
 	Untested bool
 }
 
-// Tier is the save tier shown as a coloured dot before every setting in the
+// Tier is the save tier shown as a colored dot before every setting in the
 // group, per the redesign: instant (nothing stops), interruption (the
 // stream rebuilds briefly), reboot (the camera restarts). There is no
 // "untested" tier here -- every curated setting has been exercised on a real
@@ -255,7 +276,7 @@ func (g Group) TierLabel() string {
 // nobody has to pull frames off four cameras a second time to recover it.
 //
 // The honest limit: only those two values were ever OBSERVED. Whether a
-// camera would accept, say, 32768 and centre an overlay is simply not
+// camera would accept, say, 32768 and center an overlay is simply not
 // known, and this control does not pretend to know by offering it. An
 // operator who wants to find out can still write topLeftX and topLeftY to
 // anything from the advanced page, where every field of the raw block
@@ -281,8 +302,8 @@ type osdCorner struct {
 func osdCorners() []osdCorner {
 	return []osdCorner{
 		{"top left", osdNearEdge, osdNearEdge},
-		// Top centre: a TrackMix holds its timestamp at 65537,1 and draws it
-		// centred along the top edge (seen on its own stream, 2026-10-23),
+		// Top center: a TrackMix holds its timestamp at 65537,1 and draws it
+		// centered along the top edge (seen on its own stream, 2026-10-23),
 		// which is also the value reported in issue #10.
 		{"top center", osdCenter, osdNearEdge},
 		{"top right", osdFarEdge, osdNearEdge},
@@ -361,9 +382,9 @@ func curatedGroups() []Group {
 			// change the live picture without dropping the stream (watched
 			// on a TrackMix and an RLC-810A, 2026-10-23).
 			Fields: []Field{
-				{Label: "Brightness", XPath: "VideoInput/bright", Kind: "number", Slug: "image-brightness"},
-				{Label: "Contrast", XPath: "VideoInput/contrast", Kind: "number", Slug: "image-contrast"},
-				{Label: "Saturation", XPath: "VideoInput/saturation", Kind: "number", Slug: "image-saturation"},
+				{Label: "Brightness", XPath: "VideoInput/bright", Kind: "number", Min: 0, Max: 255, Slug: "image-brightness"},
+				{Label: "Contrast", XPath: "VideoInput/contrast", Kind: "number", Min: 0, Max: 255, Slug: "image-contrast"},
+				{Label: "Saturation", XPath: "VideoInput/saturation", Kind: "number", Min: 0, Max: 255, Slug: "image-saturation"},
 				{Label: "Day and night mode", XPath: "InputAdvanceCfg/DayNight/mode", Kind: "choice", Slug: "image-daynight", Help: "Auto switches to black and white with infrared when it gets dark.",
 					Choices: []Choice{{"auto", "Auto"}, {"color", "Color"}, {"blackAndWhite", "Black & white"}}},
 				// The picture's orientation, for a camera mounted upside down
@@ -373,8 +394,11 @@ func curatedGroups() []Group {
 				{Label: "Flip vertically", XPath: "InputAdvanceCfg/flip", Kind: "toggle", Slug: "image-flip", Help: "For a camera mounted upside down, on a ceiling."},
 				// The two below were captured from the Reolink app writing
 				// isp set (25) on a TrackMix, 2026-10-26.
-				{Label: "Sharpness", XPath: "VideoInput/sharpen", Kind: "number", Slug: "image-sharpness"},
-				{Label: "Anti-flicker", XPath: "InputAdvanceCfg/PowerLineFrequency/mode", Kind: "choice", Slug: "image-antiflicker", Help: "Match your mains frequency to stop lights flickering in the picture: 60 Hz in the Americas, 50 Hz in most other places.",
+				{Label: "Sharpness", XPath: "VideoInput/sharpen", Kind: "number", Min: 0, Max: 255, Slug: "image-sharpness"},
+				// The frequency is ignored while enable is 0: an RLC-810A
+				// answered OK to 60hz and kept 50hz (click test, 10-27).
+				{Label: "Anti-flicker", XPath: "InputAdvanceCfg/PowerLineFrequency/enable", Kind: "toggle", Slug: "image-antiflicker-on", Governs: "image-antiflicker", Help: "Stops indoor lights flickering in the picture. Off suits a camera that only sees daylight."},
+				{Label: "Mains frequency", XPath: "InputAdvanceCfg/PowerLineFrequency/mode", Kind: "choice", Slug: "image-antiflicker", Help: "Match your mains frequency: 60 Hz in the Americas, 50 Hz in most other places.",
 					Choices: []Choice{{"50hz", "50 Hz"}, {"60hz", "60 Hz"}}},
 			},
 		},
@@ -464,7 +488,11 @@ func curatedGroups() []Group {
 				{Label: "Recipient 1", XPath: "Email/address1", Kind: "text", Slug: "email-to1"},
 				{Label: "Recipient 2", XPath: "Email/address2", Kind: "text", Slug: "email-to2"},
 				{Label: "Recipient 3", XPath: "Email/address3", Kind: "text", Slug: "email-to3"},
-				{Label: "Attach a picture", XPath: "Email/attachment", Kind: "toggle", Slug: "email-attach", Help: "Adds a snapshot to each alert email."},
+				// attachmentType is what the camera goes by; the older
+				// attachment toggle beside it is ignored on an RLC-810A
+				// (click test, 10-27), and missing altogether with video.
+				{Label: "Attachment", XPath: "Email/attachmentType", Kind: "choice", Slug: "email-attach", Help: "What each alert email carries.",
+					Choices: []Choice{{"none", "None"}, {"picture", "A picture"}, {"video", "A video clip"}}},
 			},
 		},
 		{
@@ -494,7 +522,7 @@ func curatedGroups() []Group {
 			Blocks:   []string{"md get"},
 			Fields: []Field{
 				{Label: "Motion detection", XPath: "MD/enable", Kind: "toggle", Slug: "md-enable", Governs: "md-sensitivity"},
-				{Label: "Sensitivity", XPath: "MD/sensInfoNew/sensitivityDefault", Kind: "number", Invert: 51, Slug: "md-sensitivity", Help: "1 to 50. Higher notices smaller changes, like a person far away."},
+				{Label: "Sensitivity", XPath: "MD/sensInfoNew/sensitivityDefault", Kind: "number", Min: 1, Max: 50, Invert: 51, Slug: "md-sensitivity", Help: "1 to 50. Higher notices smaller changes, like a person far away."},
 			},
 		},
 		aiDetectGroup("Person detection", "people"),
@@ -534,7 +562,7 @@ func curatedGroups() []Group {
 			Optional: true,
 			Blocks:   []string{"audio cfg get"},
 			Fields: []Field{
-				{Label: "Volume", XPath: "audioCfg/volume", Kind: "number", Slug: "audio-volume", Help: "0 to 100, for talk and the siren."},
+				{Label: "Volume", XPath: "audioCfg/volume", Kind: "number", Min: 0, Max: 100, Slug: "audio-volume", Help: "0 to 100, for talk and the siren."},
 				{Label: "Siren sound", XPath: "audioCfg/audioSelect", Kind: "choice", Slug: "audio-select", Help: "Custom is the sound uploaded below.",
 					Choices: []Choice{{"0", "Default"}, {"1", "Custom"}}},
 			},
@@ -558,14 +586,15 @@ func curatedGroups() []Group {
 			},
 		},
 		{
-			Title:         "Spotlight",
-			Optional:      true,
-			Blocks:        []string{"floodlight task get"},
-			ConfirmReason: lightsConfirmReason,
+			Title:           "Spotlight",
+			Optional:        true,
+			NeedsFloodlight: true,
+			Blocks:          []string{"floodlight task get"},
+			ConfirmReason:   lightsConfirmReason,
 			Fields: []Field{
-				{Label: "Brightness", XPath: "FloodlightTask/brightness_cur", Kind: "number", Slug: "spot-brightness"},
-				{Label: "Schedule starts (hour)", XPath: "FloodlightTask/schedule/startHour", Kind: "number", Slug: "spot-start"},
-				{Label: "Schedule ends (hour)", XPath: "FloodlightTask/schedule/endHour", Kind: "number", Slug: "spot-end"},
+				{Label: "Brightness", XPath: "FloodlightTask/brightness_cur", Kind: "number", Min: 0, Max: 100, Slug: "spot-brightness"},
+				{Label: "Schedule starts (hour)", XPath: "FloodlightTask/schedule/startHour", Kind: "number", Min: 0, Max: 23, Slug: "spot-start"},
+				{Label: "Schedule ends (hour)", XPath: "FloodlightTask/schedule/endHour", Kind: "number", Min: 0, Max: 23, Slug: "spot-end"},
 			},
 		},
 		// The four below were proved on a TrackMix by flipping each, reading
@@ -638,8 +667,8 @@ func aiDetectGroup(title, kind string) Group {
 		Optional: true,
 		Blocks:   []string{"ai detect cfg get#" + kind},
 		Fields: []Field{
-			{Label: "Sensitivity", XPath: "AiDetectCfg/sensitivity", Kind: "number", Slug: "ai-" + kind + "-sensitivity", Help: "0 to 100. Higher catches more, and more false alarms."},
-			{Label: "Alarm delay (seconds)", XPath: "AiDetectCfg/stayTime", Kind: "number", Slug: "ai-" + kind + "-delay", Help: "How long it has to be there before it counts. 0 to 8."},
+			{Label: "Sensitivity", XPath: "AiDetectCfg/sensitivity", Kind: "number", Min: 0, Max: 100, Slug: "ai-" + kind + "-sensitivity", Help: "0 to 100. Higher catches more, and more false alarms."},
+			{Label: "Alarm delay (seconds)", XPath: "AiDetectCfg/stayTime", Kind: "number", Min: 0, Max: 8, Slug: "ai-" + kind + "-delay", Help: "How long it has to be there before it counts. 0 to 8."},
 		},
 	}
 }
@@ -687,7 +716,7 @@ func expandAlso(block string, edits []edit) ([]edit, error) {
 // elements, changes whitespace, and drops every field this code does not
 // model, and formatting is not cosmetic here: a compact document is
 // accepted for TalkAbility and refused for TalkConfig. The camera supplies
-// its own schema, including fields nobody here has ever modelled, and
+// its own schema, including fields nobody here has ever modeled, and
 // echoing its own document back byte for byte except for the one field
 // being changed is what makes writes work on models nobody here has seen.
 //
@@ -863,6 +892,10 @@ func resolveGroupBlock(ctx context.Context, conn *baichuan.Conn, g Group) (pair 
 			lastReason = fmt.Sprintf("%s: %s", name, baichuan.ExplainStatus(status))
 			continue
 		}
+		// The name as the group listed it, variant and all ("ai detect cfg
+		// get#people"): it is what the form posts back as the block, and a
+		// write without the variant is refused as not a curated field.
+		p.Name = name
 		return p, d, ""
 	}
 	if lastReason == "" {
@@ -1077,6 +1110,32 @@ func (s *Server) serveApplySetting(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
+	}
+	// A whole-document comparison cannot tell a camera that reformatted
+	// what it kept from one that kept nothing. The fields this form edits
+	// can: read each one back. All of them as sent is saved; any of them
+	// still at its old value is not, whatever the camera answered.
+	if result.Outcome == "accepted" && len(result.After) > 0 {
+		kept, stale := true, ""
+		for _, e := range edits {
+			got, ok := fieldValue(result.After, e.XPath)
+			if !ok || strings.TrimSpace(got) != strings.TrimSpace(e.Value) {
+				kept = false
+				if ok {
+					stale = strings.TrimSpace(got)
+				}
+				break
+			}
+		}
+		if kept {
+			result.Outcome, result.Detail = "confirmed", "read back on a fresh connection: the camera holds the new value."
+		} else {
+			result.Outcome = "refused"
+			result.Detail = "the camera answered OK but did not keep it"
+			if stale != "" {
+				result.Detail += " (it still reports " + stale + ")"
+			}
+		}
 	}
 
 	// Post/redirect/get rather than rendering the write's own result page.

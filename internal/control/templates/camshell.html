@@ -20,8 +20,19 @@
 {{with .Model}}<span>{{.}}</span>{{end}}
 <a class="mono camhead-ip" href="http://{{.Address}}" target="_blank" rel="noopener noreferrer" title="Open the camera's own page">{{.Address}}&nbsp;&#8599;</a>
 {{with .Firmware}}<span class="mono">{{.}}</span>{{end}}
+{{if .HasBattery}}<span class="mono"{{if .Charging}} title="Charging"{{end}}>Battery {{.Battery}}%{{if .Charging}} &#9889; charging{{end}}</span>{{end}}
 {{with .WiFi}}<span class="mono" title="Wi-Fi signal strength: closer to 0 is stronger; weaker than about -70 dBm tends to drop frames">Wi-Fi {{.}} dBm</span>{{end}}
 </span>
+<details class="camhead-rename">
+<summary title="Rename this camera">Rename</summary>
+<form method="post" action="/cameras/{{.Name}}/rename">
+<label class="field"><span class="label">Name</span><input type="text" name="display" value="{{.Name}}" required></label>
+{{with .DeviceName}}<button type="button" class="quiet rename-take" data-name="{{.}}">Use the camera's name: {{.}}</button>{{end}}
+<label class="check"><input type="checkbox" name="oncamera" value="1"> Also set this name on the camera (the Reolink app and the name on the picture)</label>
+<p class="hint">reostream's own name is used in the stream URLs, so it is kept to lower case, digits and _: "Front Door" becomes front_door. If that changes, update Frigate with the new URLs.</p>
+<button type="submit">Save name</button>
+</form>
+</details>
 </div>
 <nav class="tabs camtabs">
 <a href="/cameras/{{.Name}}"{{if eq .Tab "live"}} aria-current="page"{{end}}>Live</a>
@@ -31,6 +42,14 @@
 </nav>
 </header>
 <script>
+// "Use the camera's name" copies the camera's own name into the field.
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('.rename-take');
+  if (!b) return;
+  var f = b.closest('form').querySelector('input[name=display]');
+  f.value = b.dataset.name;
+  f.focus();
+});
 // [ and ] step through the cameras, like the redesign. Not while typing.
 document.addEventListener('keydown', function (e) {
   if (e.key !== '[' && e.key !== ']') return;

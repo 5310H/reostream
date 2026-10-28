@@ -9,18 +9,16 @@
   <Project>https://github.com/VoltTech21/reostream</Project>
   <Overview>Stable Reolink streams for Frigate, go2rtc or any recorder. reostream talks to Reolink cameras over their own protocol (port 9000, the one the Reolink app and NVR use) instead of their RTSP server, and serves the video back out as RTSP and HTTP. That avoids the dropped frames and smearing of the cameras' RTSP server, and gets you full-res 4K main streams. Also changes camera settings (lights, time, defaults) from one page.&#xD;
 &#xD;
-First run: open the WebUI, then get the one-time token from the container log (Docker tab, reostream, Logs) and paste it in to claim the install.&#xD;
-&#xD;
-Before the first start, open the Unraid terminal and run: mkdir -p /mnt/user/appdata/reostream &amp;&amp; chown 65532:65532 /mnt/user/appdata/reostream (the container runs as that user, not root). If you skip this, the log says so and the claim tells you the same command.</Overview>
+First run: open the WebUI, then get the one-time token from the container log (Docker tab, reostream, Logs) and paste it in to claim the install.</Overview>
   <Category>MediaServer:Video HomeAutomation Security:</Category>
   <WebUI>http://[IP]:[PORT:8562]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/VoltTech21/reostream/main/contrib/unraid/reostream.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/VoltTech21/reostream/main/contrib/unraid/reostream.png</Icon>
-  <ExtraParams/>
+  <ExtraParams>--user 99:100</ExtraParams>
   <PostArgs/>
-  <Requires>Reolink cameras with port 9000 reachable (on by default). Create /mnt/user/appdata/reostream owned by 65532:65532 before the first start.</Requires>
+  <Requires>Reolink cameras with port 9000 reachable (on by default).</Requires>
   <Config Name="Streams (HTTP)" Target="8560" Default="8560" Mode="tcp" Description="MPEG-TS streams, http://[IP]:8560/camera.ts" Type="Port" Display="always" Required="true" Mask="false">8560</Config>
   <Config Name="Streams (RTSP)" Target="8561" Default="8561" Mode="tcp" Description="RTSP streams for go2rtc or Frigate, rtsp://[IP]:8561/camera" Type="Port" Display="always" Required="true" Mask="false">8561</Config>
   <Config Name="WebUI" Target="8562" Default="8562" Mode="tcp" Description="Control page: claim, cameras, settings, logs" Type="Port" Display="always" Required="true" Mask="false">8562</Config>
-  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/reostream" Mode="rw" Description="Holds config.toml. Must be owned by 65532:65532." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/reostream</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/reostream" Mode="rw" Description="Holds config.toml. The container runs as nobody:users (99:100), like other Unraid apps, so appdata needs no setup." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/reostream</Config>
 </Container>

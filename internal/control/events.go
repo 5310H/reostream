@@ -106,6 +106,25 @@ type motionWaker interface {
 	Motion(camera string, on bool) bool
 }
 
+// motionHooker is the part of the supervisor that reports a battery
+// camera's motion from its waking (supervisor.Supervisor.SetMotionHook).
+type motionHooker interface {
+	SetMotionHook(func(camera string, on bool))
+}
+
+// batteryMotion relays motion seen from a battery camera waking on its
+// own. The supervisor has already woken the camera's stream for it. It
+// returns at once: the supervisor calls it from its watch loop, and a
+// Frigate call can take seconds.
+func (r *eventRelay) batteryMotion(camera string, on bool) {
+	r.mu.Lock()
+	h := r.handle
+	r.mu.Unlock()
+	if h != nil {
+		go h(alarms.Change{Camera: camera, Kind: "motion", On: on, Time: time.Now()})
+	}
+}
+
 // clipMotionHold is how long motion stays on after a camera's last
 // uploaded file.
 var clipMotionHold = 30 * time.Second

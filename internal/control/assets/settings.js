@@ -1,4 +1,4 @@
-// Camera page behaviour.
+// Camera page behavior.
 //
 // Two things here. A two-state setting is a switch, not a dropdown, and a
 // switch posts the same form the dropdown did. And a position select whose
@@ -11,7 +11,7 @@
   // redrawn, so the live preview keeps playing and the row stays put.
   //
   // send() goes through requestSubmit, so a form's own confirm still comes
-  // first; a cancelled confirm puts the control back.
+  // first; a canceled confirm puts the control back.
   function send(form, undo) {
     form._undo = undo;
     form.requestSubmit();
@@ -59,9 +59,13 @@
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var flash = doc.querySelector('.flash');
       var refused = flash && flash.classList.contains('flash-refused');
+      // "Accepted" is the camera answering OK and then, read back, still
+      // holding the old value: not saved, whatever its answer said. Say
+      // so, and let refresh show what the camera really holds.
+      var unconfirmed = flash && flash.classList.contains('flash-accepted');
       if (refused && undo) undo();
       var text = flash ? flash.querySelector('.flash-text').textContent.trim() : 'Saved';
-      say(refused || form.hasAttribute('data-report') ? text : 'Saved', refused);
+      say(refused || unconfirmed || form.hasAttribute('data-report') ? text : 'Saved', refused || unconfirmed);
       if (!refused) refresh(form, doc);
       governs();
     }).catch(function (err) {
@@ -175,6 +179,20 @@
 
     governs();
 
+    // A typed value outside the field's range is never sent. It used to be
+    // blocked silently and left in the box, so the box showed a value the
+    // camera never got. Now the browser says why, and the box goes back to
+    // the value the camera holds.
+    function outOfRange(box, saved) {
+      if (box.checkValidity()) return false;
+      var min = box.getAttribute('min'), max = box.getAttribute('max');
+      box.setCustomValidity(min !== null && max !== null ? 'Use a value from ' + min + ' to ' + max + '.' : '');
+      box.reportValidity();
+      box.setCustomValidity('');
+      box.value = saved;
+      return true;
+    }
+
     // Keeps each slider and its number box showing the same value. The box
     // is authoritative -- it is the input that posts -- so the slider
     // follows it only when the typed value is one the track can represent;
@@ -186,6 +204,7 @@
       var saved = box.value;
       var save = function () {
         if (box.value === saved || !box.form) return;
+        if (outOfRange(box, saved)) { range.value = saved; return; }
         var before = saved;
         saved = box.value;
         send(box.form, function () { box.value = before; range.value = before; saved = before; });
@@ -214,6 +233,7 @@
       var saved = input.value;
       input.addEventListener('change', function () {
         if (input.value === saved) return;
+        if (outOfRange(input, saved)) return;
         var before = saved;
         saved = input.value;
         send(input.form, function () { input.value = before; saved = before; });
@@ -289,6 +309,14 @@
     if (controls) video.setAttribute('controls', '');
     if (still) still.hidden = true;
     if (btn) btn.hidden = true;
+    // The settings preview takes the picture's own shape, so a panoramic
+    // or a fisheye is shown whole instead of cropped to a 16:9 box.
+    if (container.closest('.sec-preview')) {
+      video.addEventListener('loadedmetadata', function () {
+        if (video.videoWidth && video.videoHeight)
+          container.style.aspectRatio = (video.videoWidth / video.videoHeight).toFixed(4);
+      });
+    }
   }
 
   if (container.dataset.autoplay) {

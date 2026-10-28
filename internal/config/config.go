@@ -53,6 +53,14 @@ type Camera struct {
 	// motion. Only for a battery camera on constant power: on its battery
 	// it drains in days. Off by default.
 	AlwaysOn bool `toml:"always_on"`
+
+	// Rotate turns this camera's picture for anything that decodes it:
+	// 90, 180 or 270 degrees anticlockwise, written into the H.265 stream
+	// as a display orientation note rather than re-encoded. Unset, the
+	// camera's own word decides: the 16 MP dual-lens boards encode their
+	// full resolution sideways and say so at login (needRotate). Set it to
+	// 0 to leave a camera's picture alone whatever it says.
+	Rotate *int `toml:"rotate"`
 }
 
 // RTSPConfig configures the RTSP listener. Its absence turns RTSP off
@@ -135,7 +143,7 @@ type FTPConfig struct {
 // NormalizeAddr applies the same default-port rule baichuan.Dial does, so
 // "192.0.2.50" and "192.0.2.50:9000" compare equal as the same camera.
 //
-// Exported so a caller outside this package that also needs to recognise
+// Exported so a caller outside this package that also needs to recognize
 // "is this the same camera as one already configured" -- the setup page's
 // probe guard is the current one -- compares addresses the same way
 // Validate does below, rather than keeping a second implementation that can
@@ -259,7 +267,7 @@ func LoadRaw(path string) (*Config, error) {
 }
 
 // Validate checks the constraints Load cannot express through decoding
-// alone: names and addresses present, streams recognised, and no two
+// alone: names and addresses present, streams recognized, and no two
 // cameras or streams that would fight over the same connection. A camera
 // permits exactly one connection per stream, so a duplicate here is not a
 // harmless redundancy, it is two runners that will fight for one session
@@ -277,7 +285,7 @@ func (c *Config) Validate() error {
 	// first-run handling. Do not add a len(c.Cameras) == 0 check back as a
 	// tidiness fix; it would make that first run impossible.
 	seenNames := make(map[string]bool, len(c.Cameras))
-	// seenAddrStreams tracks, per normalised address, which stream names
+	// seenAddrStreams tracks, per normalized address, which stream names
 	// are already claimed by which camera, so two differently named
 	// cameras that both point at one physical camera and both ask for its
 	// main stream are caught here. Two cameras sharing an address but
@@ -297,6 +305,9 @@ func (c *Config) Validate() error {
 		}
 		if cam.MotionTopic != "" && (c.Events == nil || c.Events.MQTT == "") {
 			return fmt.Errorf("camera %q: motion_topic needs an [events] section with mqtt", cam.Name)
+		}
+		if r := cam.Rotate; r != nil && *r != 0 && *r != 90 && *r != 180 && *r != 270 {
+			return fmt.Errorf("camera %q: rotate is %d; use 0, 90, 180 or 270", cam.Name, *r)
 		}
 		if cam.AlwaysOn && cam.UID == "" {
 			return fmt.Errorf("camera %q: always_on is for a battery camera, one with a uid", cam.Name)

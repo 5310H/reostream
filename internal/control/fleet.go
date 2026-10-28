@@ -64,6 +64,24 @@ func loadFleet(configPath string) ([]Camera, error) {
 	return out, nil
 }
 
+// byNameDirect is byName for the pages that set the whole device rather
+// than one camera -- its clock, its network ports, its reboot. Behind a
+// hub or NVR the device on the other end is the recorder, not the
+// camera, so those refuse a camera that has a channel rather than change
+// the recorder by mistake.
+func (s *Server) byNameDirect(name string) (Camera, error) {
+	c, err := s.byName(name)
+	if err != nil {
+		return c, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), pageDialTimeout)
+	defer cancel()
+	if s.behindRecorder(ctx, c) {
+		return Camera{}, fmt.Errorf("control: %q is channel %d on a hub or NVR; this setting belongs to the recorder itself, so set it on the recorder", name, c.Channel)
+	}
+	return c, nil
+}
+
 // byName finds one camera. Handlers take a camera name in the URL rather
 // than an address, so a page cannot be pointed at an arbitrary host.
 func (s *Server) byName(name string) (Camera, error) {
@@ -73,12 +91,6 @@ func (s *Server) byName(name string) (Camera, error) {
 	}
 	for _, c := range cams {
 		if c.Name == name {
-			if c.Channel != 0 {
-				// Every settings path here, Baichuan and HTTP alike,
-				// addresses channel 0. Behind a hub that is a different
-				// camera, so refuse rather than change the wrong one.
-				return Camera{}, fmt.Errorf("control: %q is channel %d on a hub or NVR; its video works, but camera settings for hub cameras are not supported yet", name, c.Channel)
-			}
 			return c, nil
 		}
 	}
@@ -138,7 +150,7 @@ type FleetResult struct {
 // call rather than only being checked between calls: this is a real
 // ceiling on the read/write/read-back chain, not merely a number
 // multiplied out in a comment. See cgi.Client.do and
-// TestGetHonoursContextCancellation in internal/cgi for the mechanism and
+// TestGetHonorsContextCancellation in internal/cgi for the mechanism and
 // its regression test.
 //
 // The one call this ceiling still does not reach into is the initial
@@ -175,7 +187,7 @@ func (s *Server) applyAll(ctx context.Context, apply func(context.Context, Camer
 	// how many cameras are down.
 	//
 	// These are different cameras and different connections, so there is
-	// nothing to serialise for the protocol's sake: the supervisor already
+	// nothing to serialize for the protocol's sake: the supervisor already
 	// runs one goroutine per stream, and shutdown already stops every
 	// stream at once for the same reason.
 	results := make([]FleetResult, len(cams))

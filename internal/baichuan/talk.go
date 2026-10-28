@@ -75,6 +75,14 @@ func ParseTalkAbility(x []byte) (TalkFormat, error) {
 	}
 	if len(r.Ability.StreamModes.Mode) > 0 {
 		f.StreamMode = r.Ability.StreamModes.Mode[0]
+		// The Reolink app asks for mixAudioStream when it is offered
+		// (TrackMix capture, 10-24), not the first mode listed
+		// (followVideoStream).
+		for _, m := range r.Ability.StreamModes.Mode {
+			if m == "mixAudioStream" {
+				f.StreamMode = m
+			}
+		}
 	}
 	return f, nil
 }

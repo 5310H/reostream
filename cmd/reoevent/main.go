@@ -171,7 +171,7 @@ func (f *feeder) run(ctx context.Context, ch <-chan bcevent.Report) {
 }
 
 func (f *feeder) handle(r bcevent.Report, motionOn *bool, motionOff *time.Timer) {
-	// The raw event is always republished, so a template or a yet-unmodelled
+	// The raw event is always republished, so a template or a yet-unmodeled
 	// event type is still usable downstream.
 	f.pub.publish(f.topic("event"), r.Raw, false)
 

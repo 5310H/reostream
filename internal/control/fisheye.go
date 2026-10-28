@@ -32,7 +32,7 @@ import (
 //     to twenty seconds, the auth token is invalidated, and every recorder
 //     reading it loses the stream and reconnects.
 //   - every motion mask and detection zone drawn against the old geometry
-//     is now pointing somewhere else. Those coordinates are normalised to
+//     is now pointing somewhere else. Those coordinates are normalized to
 //     the frame, so a zone drawn on the circle is not the same place once
 //     the picture is a panorama.
 //
@@ -95,8 +95,8 @@ func fisheyeValueByMode(mode int) string {
 const fisheyeConfirmReason = "This restarts the camera (about 20 seconds) and moves its motion zones. Change the view?"
 
 // readFisheye reads the camera's current view mode.
-func readFisheye(ctx context.Context, c *cgi.Client) (cgi.FishEye, error) {
-	return c.GetFishEye(ctx, 0)
+func readFisheye(ctx context.Context, c *cgi.Client, channel int) (cgi.FishEye, error) {
+	return c.GetFishEye(ctx, channel)
 }
 
 func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
 	// The current view, for the undo and for Before. Best effort: a failed
 	// pre-read is not a reason to refuse the write.
 	var before string
-	current, readErr := readFisheye(ctx, c)
+	current, readErr := readFisheye(ctx, c, cam.Channel)
 	if readErr == nil {
 		before = fisheyeValueByMode(int(current.ImageType))
 	}
@@ -146,7 +146,7 @@ func (s *Server) serveApplyFisheye(w http.ResponseWriter, r *http.Request) {
 	next := current
 	next.ImageType = cgi.FishEyeMode(opt.Mode)
 	result := WriteResult{Before: []byte(before)}
-	if err := c.SetFishEye(ctx, 0, next); err != nil {
+	if err := c.SetFishEye(ctx, cam.Channel, next); err != nil {
 		result.Outcome = "refused"
 		result.Detail = err.Error()
 	} else {

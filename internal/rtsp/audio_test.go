@@ -9,7 +9,7 @@ import (
 )
 
 // A camera that sends AAC must have it in the description. The description is
-// fixed once the server stream is initialised, so initialising on the first
+// fixed once the server stream is initialized, so initializing on the first
 // keyframe would lock audio out permanently.
 func TestAACIsOfferedWhenTheCameraSendsIt(t *testing.T) {
 	frames := captureFrames(t)
@@ -60,7 +60,7 @@ func TestVideoOnlyCameraStillBecomesReady(t *testing.T) {
 	}
 }
 
-// ADPCM has no RTP mapping worth carrying, and relabelling it as something
+// ADPCM has no RTP mapping worth carrying, and relabeling it as something
 // else would hand a client bytes it cannot decode.
 func TestADPCMIsNotOffered(t *testing.T) {
 	frames := captureFrames(t)

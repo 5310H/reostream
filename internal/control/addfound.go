@@ -49,10 +49,16 @@ func (s *Server) serveAddFound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var out addFoundResult
-	for _, addr := range addrs {
-		name := strings.TrimSpace(r.FormValue("name." + addr))
+	for _, key := range addrs {
+		// A camera on an NVR or Home Hub is keyed "address#channel": the
+		// recorder's address, its login, and the camera's channel.
+		addr, channel, _ := strings.Cut(key, "#")
+		name := strings.TrimSpace(r.FormValue("name." + key))
 		if name == "" {
 			name = suggestedName(addr)
+			if channel != "" {
+				name += "_ch" + channel
+			}
 		}
 		// Credentials per camera, not one pair for the batch: the scan
 		// identifies most cameras as admin with no password, but any that
@@ -61,26 +67,26 @@ func (s *Server) serveAddFound(w http.ResponseWriter, r *http.Request) {
 		// path still posts it) is the fallback; admin is the last resort, so
 		// a camera is never written with the empty username that produces a
 		// 401 loop.
-		user := r.FormValue("username." + addr)
+		user := r.FormValue("username." + key)
 		if user == "" {
 			user = r.FormValue("username")
 		}
 		if user == "" {
 			user = "admin"
 		}
-		pass := r.FormValue("password." + addr)
-		if _, ok := r.Form["password."+addr]; !ok {
+		pass := r.FormValue("password." + key)
+		if _, ok := r.Form["password."+key]; !ok {
 			pass = r.FormValue("password")
 		}
-		streams := r.Form["streams."+addr]
-		if uid := strings.TrimSpace(r.FormValue("uid." + addr)); uid != "" {
+		streams := r.Form["streams."+key]
+		if uid := strings.TrimSpace(r.FormValue("uid." + key)); uid != "" {
 			// A battery camera: check the login over UDP (one short wake),
 			// then add it with no streams so nothing keeps it awake.
 			if err := s.checkBatteryLogin(r.Context(), addr, uid, user, pass); err != nil {
 				out.Failed = append(out.Failed, addFoundFailure{Address: addr, Reason: err.Error()})
 				continue
 			}
-			if err := s.addOneFound(addr, name, user, pass, nil, uid); err != nil {
+			if err := s.addOneFound(addr, name, user, pass, nil, uid, ""); err != nil {
 				out.Failed = append(out.Failed, addFoundFailure{Address: addr, Reason: err.Error()})
 				continue
 			}
@@ -96,11 +102,15 @@ func (s *Server) serveAddFound(w http.ResponseWriter, r *http.Request) {
 			})
 			continue
 		}
-		if err := s.addOneFound(addr, name, user, pass, streams, ""); err != nil {
+		if err := s.addOneFound(addr, name, user, pass, streams, "", channel); err != nil {
 			out.Failed = append(out.Failed, addFoundFailure{Address: addr, Reason: err.Error()})
 			continue
 		}
-		out.Added = append(out.Added, fmt.Sprintf("%s as %s", addr, name))
+		where := addr
+		if channel != "" {
+			where = fmt.Sprintf("%s channel %s", addr, channel)
+		}
+		out.Added = append(out.Added, fmt.Sprintf("%s as %s", where, name))
 	}
 	sort.Strings(out.Added)
 	s.renderAddFound(w, out)
@@ -114,7 +124,7 @@ func (s *Server) serveAddFound(w http.ResponseWriter, r *http.Request) {
 // therefore a sequence of individual writes rather than one atomic batch,
 // which is also what makes a single bad camera fail on its own instead of
 // discarding the rest of the selection.
-func (s *Server) addOneFound(addr, name, user, pass string, streams []string, uid string) error {
+func (s *Server) addOneFound(addr, name, user, pass string, streams []string, uid, channel string) error {
 	text, err := loadRawConfig(s.opts.ConfigPath)
 	if err != nil {
 		return err
@@ -134,6 +144,7 @@ func (s *Server) addOneFound(addr, name, user, pass string, streams []string, ui
 		"password": {pass},
 		"streams":  streams,
 		"uid":      {uid},
+		"channel":  {channel},
 	}
 	if err := applyCameraForm(cfg, form); err != nil {
 		return err

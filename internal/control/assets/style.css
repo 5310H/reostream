@@ -1,13 +1,13 @@
 /* reostream operator page.
  *
  * The four stream states, the three write outcomes and the four write
- * confidences are the only places this interface spends colour. Everything
+ * confidences are the only places this interface spends color. Everything
  * else stays quiet so those signals stay legible across a fleet.
  *
  * Two rules carry the rest of the design:
  *   - every state is written once as a sentence and once as the exact
  *     value beside it, so the page serves a first-time operator and a
- *     practised one without a mode switch;
+ *     practiced one without a mode switch;
  *   - protocol detail (message ids, xpaths, CGI notes) appears only on the
  *     pages whose subject IS the protocol: Advanced and Config.
  */
@@ -15,7 +15,7 @@
 :root {
   /* Dark-graphite palette from the UI redesign (Oct 2026). The whole page is
    * variable-driven, so these values retheme every screen at once. The tier
-   * colours (--ok/--warn/--bad) double as the setting-tier dots: instant,
+   * colors (--ok/--warn/--bad) double as the setting-tier dots: instant,
    * interruption, reboots. --untested is the fourth tier (not yet verified on
    * a model). --accent is the one blue the design spends on primary actions,
    * links and selection, kept distinct from the green "instant" tier. */
@@ -132,6 +132,7 @@ code, pre, .mono { font-family: var(--mono); }
 .sidebar nav a:hover { color: var(--text); background: rgba(255, 255, 255, .04); }
 
 .sidebar nav a[aria-current="page"] { color: var(--ink); background: var(--accent); }
+.sidebar nav a[aria-current="page"] .tag { color: var(--ink); border-color: currentColor; }
 
 .sidebar nav .cameras a { font-weight: 400; font-size: 12.5px; }
 .sidebar nav .cameras a[aria-current="page"] { color: var(--text); background: var(--raise); }
@@ -445,16 +446,14 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
 
 /* Status grid ----------------------------------------------------------- */
 
-/* align-items: start so a card is only as tall as it needs to be. Tiles
-   take their camera's own shape now (see shapeTile in dashboard.js), so a
-   panoramic card is short and a fisheye card is tall, and stretching them
-   to a common height would put back exactly the empty band that change
-   removed. */
+/* Every tile here is 16:9 (see shapeTile in dashboard.js), so the cards in
+   a row stretch to one height: a camera with fewer streams listed (the
+   fisheye has only sub) would otherwise end short of its neighbors. */
 .fleet {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .camcard {
@@ -509,6 +508,12 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
    side of a tile that has no picture yet. */
 .cam-video img[hidden], .cam-video video[hidden] { display: none; }
 
+/* Fleet tiles all stay 16:9 (dashboard.js shapeTile says how each frame
+   fits): near that shape it fills the tile, otherwise it sits whole on
+   black, which reads as the picture's edge rather than a missing one. */
+.fleet .cam-video.fit-cover img, .fleet .cam-video.fit-cover video { object-fit: cover; }
+.fleet .cam-video.letterbox { background: #000; }
+
 .cam-video .play-btn {
   position: absolute;
   top: 50%;
@@ -545,8 +550,10 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
    Cards view does, instead of a pill beside the name. */
 .camcard-tile { position: relative; line-height: 0; }
 .tile-state {
+  /* Bottom left, like the Live page's LIVE tag: the top corners are where
+     Reolink cameras draw their own date (click test, 10-27). */
   position: absolute;
-  top: 10px;
+  bottom: 10px;
   left: 10px;
   z-index: 1;
   display: inline-flex;
@@ -556,7 +563,7 @@ details.help > p { font: 400 12.5px/1.6 var(--sans); color: var(--dim); margin: 
   border-radius: 999px;
   background: rgba(12, 14, 18, .82);
   font: 500 11px/1 var(--mono);
-  /* colour comes from the state-* class on the same element */
+  /* color comes from the state-* class on the same element */
 }
 .tile-state .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
@@ -944,7 +951,7 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
   padding: 12px 18px;
   border-radius: 10px;
   /* Its own ground rather than a token: this sits on live video, which is
-     any colour at all, so it cannot borrow the page's surface. */
+     any color at all, so it cannot borrow the page's surface. */
   background: rgba(8, 13, 11, .86);
   border: 1px solid rgba(143, 160, 154, .25);
   backdrop-filter: blur(6px);
@@ -980,7 +987,7 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 /* The undo pair, kept quieter than the controls it undoes: on this bar the
    sliders are what someone reaches for, and these are the way back. They
    get their own ground for the same reason the bar does -- live video
-   behind them is any colour at all. */
+   behind them is any color at all. */
 
 .align-undo {
   display: flex;
@@ -1017,10 +1024,34 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
   max-width: calc(100% - 32px);
   text-align: center;
 }
+/* On a phone the bar becomes a grid: label, slider, number, one row per
+   control, so every slider starts and ends at the same place whatever its
+   label says (in a row of flex boxes, "Focus distance" pushed its slider
+   right of "Vertical"'s). Bigger targets too: these are dragged by a thumb
+   on a seam that moves a few pixels at a time. */
 @media (max-width: 720px) {
-  .align-bar { gap: 10px; padding: 10px 12px; }
-  .align-field input[type=range] { width: 5rem; }
-  .align-undo button { padding: 4px 7px; }
+  /* Picture above, controls below: floating over a portrait screen, the
+     bar covered the bottom half of the seam it is there to judge. */
+  #align { display: flex; flex-direction: column; }
+  #align-canvas { flex: 1 1 auto; min-height: 0; height: auto; }
+  .align-bar {
+    position: static;
+    margin: 0 12px 12px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) 4.5rem;
+    column-gap: 12px;
+    row-gap: 12px;
+    transform: none;
+    max-width: none;
+    padding: 12px 14px;
+  }
+  .align-field { display: contents; }
+  .align-field span { font-size: .95rem; }
+  .align-field input[type=range] { width: 100%; height: 28px; }
+  .align-field input[type=number], .align-zoom output { width: 100%; font-size: 1rem; padding: 7px 8px; }
+  .align-back, .align-check, .align-undo, .align-failed { grid-column: 1 / -1; }
+  .align-check { font-size: .95rem; }
+  .align-undo button { flex: 1; font-size: .9rem; padding: 8px 10px; }
 }
 
 /* Cameras a sweep found, selected together rather than one at a time. */
@@ -1056,7 +1087,7 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 .talk-button { touch-action: none; user-select: none; -webkit-user-select: none; }
 .talk-button.talking { filter: brightness(1.25); outline: 3px solid currentColor; outline-offset: 2px; }
 
-/* Save-tier dots (redesign): a coloured dot before every setting label says
+/* Save-tier dots (redesign): a colored dot before every setting label says
  * what saving it costs. The three tiers reuse the state palette; untested is
  * a hollow ring, used only where a thing genuinely has not been verified on a
  * model (not in the curated settings, which all have). */
@@ -1089,6 +1120,9 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 6px;
+  /* Each tile its own height: stretched to the tallest in its row (a
+     fisheye's square), the others had an empty band under the picture. */
+  align-items: start;
 }
 .wall-tile {
   position: relative;
@@ -1142,11 +1176,24 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 
 /* List view: each card a horizontal row -- small tile, then the body. */
 .fleet.view-list { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.fleet.view-list .camcard { flex-direction: row; align-items: flex-start; }
+.fleet.view-list .camcard { flex-direction: row; align-items: center; }
 .fleet.view-list .camcard-tile { flex: 0 0 180px; }
 .fleet.view-list .camcard-body { flex: 1 1 auto; min-width: 0; }
 .fleet.view-list .tile-name { display: none; }
 .fleet.view-list .cam-video .caption { display: none; }
+/* A number and its unit never split across lines ("9.9 fps" over two). */
+.streamline > span { white-space: nowrap; }
+/* On a phone the List row is tight: the picture takes a share of the width
+   rather than a fixed 180px, and the codec column goes (the stream's own
+   page still shows it), which is what let fps and bitrate wrap. */
+@media (max-width: 560px) {
+  .fleet.view-list .camcard-tile { flex: 0 0 42%; }
+  .fleet.view-list .streamline { grid-template-columns: 3.6rem 1fr auto auto; }
+  .fleet.view-list .streamline .dim { display: none; }
+  /* The address goes under the name, so it cannot push the gear off. */
+  .fleet.view-list .camcard-head { flex-wrap: wrap; row-gap: 2px; }
+  .fleet.view-list .camaddr { order: 3; flex-basis: 100%; }
+}
 
 /* Show/hide pills on the Fleet controls (name / address / stats). */
 .fc-show { margin-left: auto; }
@@ -1169,6 +1216,18 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 .fleet.hide-address .camaddr { display: none; }
 .fleet.hide-stats .streams { display: none; }
 
+/* Arrange: drag the cards into order. Nothing inside a card takes the
+   pointer, so the card itself is what gets dragged. */
+.fleet-controls { flex-wrap: wrap; }
+.fleet-arrange {
+  padding: 5px 11px; border-radius: 999px; border: 1px solid var(--edge);
+  background: none; color: var(--muted); font: 500 11.5px/1 var(--sans); cursor: pointer;
+}
+.fleet-arrange[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+.fleet.arranging .camcard { cursor: grab; touch-action: none; user-select: none; outline: 1px dashed var(--edge); outline-offset: 2px; }
+.fleet.arranging .camcard * { pointer-events: none; }
+.fleet.arranging .camcard.dragging { cursor: grabbing; opacity: .55; outline-color: var(--accent); }
+
 /* ---- Camera shell (camshell.html): header, tabs, settings categories ---- */
 .camhead-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .camhead-step {
@@ -1176,6 +1235,25 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
   padding: 4px 6px; border-radius: 6px;
 }
 .camhead-step:hover { color: var(--text); background: var(--raise); }
+/* Rename: one name for reostream, the Reolink app and the picture. A
+   popover under its own button, so the header stays one line. */
+.camhead-rename { position: relative; }
+.camhead-rename > summary {
+  display: inline-block; width: max-content;
+  list-style: none; cursor: pointer; padding: 5px 11px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--edge); color: var(--muted); font: 500 11.5px/1 var(--sans);
+}
+.camhead-rename > summary::-webkit-details-marker { display: none; }
+.camhead-rename[open] > summary { color: var(--text); border-color: var(--accent); }
+.camhead-rename form {
+  position: absolute; z-index: 20; top: calc(100% + 8px); left: 0;
+  width: min(24rem, calc(100vw - 32px)); display: grid; gap: 10px; padding: 14px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
+}
+.camhead-rename .check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; }
+.camhead-rename .hint { margin: 0; }
+.camhead-rename button { justify-self: start; }
 .camhead-pick select {
   appearance: none; -webkit-appearance: none;
   font: 600 17px/1 var(--mono); color: var(--text);
@@ -1238,8 +1316,8 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 .sec-preview-head { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font: 600 11px/1 var(--mono); color: var(--bad); }
 .sec-preview-head .hint { font-family: var(--sans); font-weight: 400; margin: 0; }
 .live-dot, .live-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bad); display: inline-block; }
-.sec-preview .cam-video { aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--field); }
-.sec-preview .cam-video video, .sec-preview .cam-video img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sec-preview .cam-video { aspect-ratio: 16 / 9; max-height: 60vh; border-radius: 8px; overflow: hidden; background: var(--field); }
+.sec-preview .cam-video video, .sec-preview .cam-video img { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 /* Label then control, close together (the design's 300px label column). */
 .cam-pane .setting { grid-template-columns: minmax(9rem, 300px) minmax(0, 1fr); }
@@ -1275,7 +1353,9 @@ a.camaddr:hover { color: var(--accent); text-decoration: underline; }
 }
 .live-player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .live-tag {
-  position: absolute; top: 12px; left: 12px; z-index: 1;
+  /* Bottom left: the top-left corner is where Reolink cameras draw their
+     own date and time, and the badge covered it (click test, 10-27). */
+  position: absolute; bottom: 12px; left: 12px; z-index: 1;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 8px; border-radius: 999px; background: rgba(12, 14, 18, .82);
   font: 600 11px/1 var(--mono); color: var(--bad);
@@ -1449,7 +1529,7 @@ button.danger-btn:hover { background: color-mix(in oklab, var(--bad) 14%, transp
 .port-field { display: inline-flex; align-items: center; gap: 6px; font: 400 12px/1 var(--sans); color: var(--muted); }
 .port-field input { width: 84px; }
 
-/* Saved / not saved, bottom centre, out of the way of the controls. */
+/* Saved / not saved, bottom center, out of the way of the controls. */
 .save-note {
   position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 20px); z-index: 50;
   padding: 9px 14px; border-radius: 8px; background: var(--raise); border: 1px solid var(--line);
@@ -1652,7 +1732,7 @@ section > .live-url { width: 100%; grid-template-columns: 1fr auto; }
 
 #add-found-button { margin-bottom: 16px; }
 
-/* A sleeping camera's last picture is labelled as such, never mistaken for live. */
+/* A sleeping camera's last picture is labeled as such, never mistaken for live. */
 .cam-video .still-note { position: absolute; left: 10px; bottom: 10px; z-index: 1; padding: 4px 8px; border-radius: 999px; background: rgba(12, 14, 18, .82); color: #fff; font: 500 11px/1 var(--mono); }
 
 .mono.warn { color: var(--warn); }
@@ -1700,3 +1780,18 @@ polyline.rule-shape { fill: none; }
 .rule-fields { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; max-width: 40rem; }
 .rule-fields input[type="number"] { width: 5rem; }
 .rule-types { display: inline-flex; gap: 10px; }
+
+/* An NVR or Home Hub in the scan: one row per camera on it. */
+.found-recorder .found-channel {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 12rem) auto;
+  gap: 10px; align-items: end; padding: 10px 0; border-top: 1px solid var(--line);
+}
+.found-recorder .found-streams { display: flex; gap: 10px; font-size: 12.5px; padding-bottom: 8px; }
+@media (max-width: 560px) { .found-recorder .found-channel { grid-template-columns: 1fr; } }
+
+/* On a phone the picture is too short for the Align hint to float over it:
+   it covered the top third of the pano (click test, 10-27). It sits under
+   the picture instead. */
+@media (max-width: 720px) {
+  .align-note { position: static; transform: none; max-width: none; margin: 8px 0 0; }
+}

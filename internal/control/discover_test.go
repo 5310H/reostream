@@ -183,10 +183,10 @@ func TestAnUnconfiguredCandidateGoesThroughTheExistingProbe(t *testing.T) {
 	t.Fatalf("127.0.0.3 was listening but is not in the result: %+v", res.Found)
 }
 
-// A cancelled request stops the sweep, and leaves nothing running behind
+// A canceled request stops the sweep, and leaves nothing running behind
 // it. A person who clicks and navigates away must not leave 254 dials in
 // flight against their own network.
-func TestASweepStopsWhenItsContextIsCancelled(t *testing.T) {
+func TestASweepStopsWhenItsContextIsCanceled(t *testing.T) {
 	port := listenLoopback(t, "127.0.0.2")
 	s := newTestServer(t, Options{})
 	s.sweepPort = port
@@ -205,7 +205,7 @@ func TestASweepStopsWhenItsContextIsCancelled(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("a sweep on a cancelled context did not return; it is not cancellable")
+		t.Fatal("a sweep on a canceled context did not return; it is not cancellable")
 	}
 
 	// sweepRange does not return until its own wg.Wait does, so by the
@@ -218,7 +218,7 @@ func TestASweepStopsWhenItsContextIsCancelled(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("goroutines went from %d to %d across a cancelled sweep; dials were left running", before, runtime.NumGoroutine())
+	t.Fatalf("goroutines went from %d to %d across a canceled sweep; dials were left running", before, runtime.NumGoroutine())
 }
 
 // The only limits left on a range are its size and that it is a real IPv4
@@ -326,7 +326,7 @@ func TestTheSetupPageCarriesItsAutoScanRanges(t *testing.T) {
 	}
 }
 
-// One sweep at a time, for the same reason inFlightProbes serialises
+// One sweep at a time, for the same reason inFlightProbes serializes
 // probes: two tabs would put twice the dials on the same wire.
 func TestTwoConcurrentSweepsDoNotBothRun(t *testing.T) {
 	s := newTestServer(t, Options{})

@@ -12,7 +12,7 @@ import (
 
 // The seam between two lenses.
 //
-// A camera with two lenses a few centimetres apart sees an object in the
+// A camera with two lenses a few centimeters apart sees an object in the
 // overlap at a different place in each image, by an amount that depends on
 // how far away it is. Near things shift a lot, distant things barely. So no
 // single alignment is right for a whole scene: the seam can be made to
@@ -51,8 +51,8 @@ type stitchPage struct {
 // readStitch fills the form from the camera, including the range, so the
 // inputs constrain themselves to what this camera actually accepts rather
 // than to numbers written down here.
-func readStitch(ctx context.Context, c *cgi.Client) (stitchPage, error) {
-	cur, fac, lim, err := c.GetStitch(ctx, 0)
+func readStitch(ctx context.Context, c *cgi.Client, channel int) (stitchPage, error) {
+	cur, fac, lim, err := c.GetStitch(ctx, channel)
 	if err != nil {
 		return stitchPage{}, err
 	}
@@ -96,7 +96,7 @@ func (s *Server) serveApplyStitch(w http.ResponseWriter, r *http.Request) {
 
 	// Read first. The camera takes all three fields together, so a form
 	// that posts one would otherwise zero the other two.
-	cur, _, lim, err := c.GetStitch(ctx, 0)
+	cur, _, lim, err := c.GetStitch(ctx, cam.Channel)
 	if err != nil {
 		s.setFlash(w, r, flashFor(cam.Name+": lens alignment", WriteResult{
 			Outcome: "refused",
@@ -151,7 +151,7 @@ func (s *Server) serveApplyStitch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := WriteResult{Before: []byte(before)}
-	if err := c.SetStitch(ctx, 0, want); err != nil {
+	if err := c.SetStitch(ctx, cam.Channel, want); err != nil {
 		result.Outcome = "refused"
 		result.Detail = err.Error()
 	} else {
@@ -231,7 +231,7 @@ func (s *Server) serveAlign(w http.ResponseWriter, r *http.Request) {
 		page.Err = fmt.Sprintf("could not reach the camera: %v", err)
 	} else {
 		defer c.Close()
-		if st, err := readStitch(ctx, c); err != nil {
+		if st, err := readStitch(ctx, c, cam.Channel); err != nil {
 			page.Err = fmt.Sprintf("could not read the lens alignment: %v", err)
 		} else {
 			page.Stitch = st

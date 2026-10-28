@@ -114,8 +114,8 @@ func (p encodingPage) MainSizes() []string {
 }
 
 // readEncoding fills the page from the camera.
-func readEncoding(ctx context.Context, c *cgi.Client) (encodingPage, error) {
-	cur, opts, err := c.GetEnc(ctx, 0)
+func readEncoding(ctx context.Context, c *cgi.Client, channel int) (encodingPage, error) {
+	cur, opts, err := c.GetEnc(ctx, channel)
 	if err != nil {
 		return encodingPage{}, err
 	}
@@ -218,7 +218,7 @@ func (s *Server) serveApplyEncoding(w http.ResponseWriter, r *http.Request) {
 	// Read first. The write sends the whole block, so the fields this form
 	// does not touch -- audio, and the sub stream when only main changed --
 	// have to come from the camera rather than from zero values.
-	cur, opts, err := c.GetEnc(ctx, 0)
+	cur, opts, err := c.GetEnc(ctx, cam.Channel)
 	if err != nil {
 		s.encodingOutcome(w, r, name, "refused", fmt.Sprintf("could not read the current encoding: %v", err))
 		return
@@ -281,12 +281,12 @@ func (s *Server) serveApplyEncoding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.SetEnc(ctx, 0, next); err != nil {
+	if err := c.SetEnc(ctx, cam.Channel, next); err != nil {
 		s.encodingOutcome(w, r, name, "refused", fmt.Sprintf("the camera did not take it: %v", err))
 		return
 	}
 	if next.Audio != cur.Audio {
-		after, _, err := c.GetEnc(ctx, 0)
+		after, _, err := c.GetEnc(ctx, cam.Channel)
 		if err != nil || after.Audio != next.Audio {
 			s.encodingOutcome(w, r, name, "refused", "audio was accepted but the camera still reports it otherwise")
 			return

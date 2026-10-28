@@ -76,7 +76,7 @@ A restore path that reuses a token captured before the change will fail with "pl
 first" and leave the camera on the wrong mode. Re-authenticate at the moment of restore.
 
 **Changing the mode invalidates any motion mask or zone drawn against the previous
-geometry.** Those coordinates are normalised to the frame, so a fisheye with door zones
+geometry.** Those coordinates are normalized to the frame, so a fisheye with door zones
 drawn on the circular view will have them pointing at the wrong places after a switch to
 mode 2 or 3.
 
@@ -130,7 +130,7 @@ discrepancy is unexplained and the earlier reading should not be trusted.
   default, which is the shape of an offset.
 
 The reason a stitched dual lens camera needs a distance at all is parallax. The two lenses
-sit a few centimetres apart, so in the region where their fields of view overlap, an object
+sit a few centimeters apart, so in the region where their fields of view overlap, an object
 appears in a different place in each image, and by how much depends on how far away it is.
 Near objects shift a lot between the two views, distant objects barely at all. That means no
 single alignment is correct for the whole scene: a seam can only be made to disappear at one
@@ -215,7 +215,7 @@ Every other audio *output* capability lands on the same two and no others:
 | `alarmAudio`, `customAudio`, `supportAudioAlarm` and its Enable/Schedule/TaskEnable | fisheye, pano |
 | `supportAudioPlay` | fisheye |
 
-`talk` is the outlier, and the fleet behaviour matches the cluster rather than the flag:
+`talk` is the outlier, and the fleet behavior matches the cluster rather than the flag:
 the fisheye and the pano open a talk session repeatedly and play audibly, while the other
 six accept a TalkConfig exactly once, return 422 on every attempt afterwards, and never
 make a sound. A camera with no speaker appears to accept the configuration and then wedge
@@ -246,7 +246,7 @@ and tilt models but not universal.
 
 | still missing | why | count |
 |---|---|---|
-| `supportZoom`, `supportFocus`, `disableAutoFocus`, `supportZoomAndFocusSliderCfg`, `supportPtzCalibration` | needs a motorised optical lens, which battery models do not carry | 5 |
+| `supportZoom`, `supportFocus`, `disableAutoFocus`, `supportZoomAndFocusSliderCfg`, `supportPtzCalibration` | needs a motorized optical lens, which battery models do not carry | 5 |
 | `ptzPatrol`, `ptzTattern` | patrol and pattern are wired PTZ features | 2 |
 | `supportBuzzer`, `supportBuzzerEnable`, `supportBuzzerTask`, `supportBuzzerTaskEnable` | needs a model with a buzzer | 4 |
 | `alarmIoIn`, `alarmIoOut`, `alarmRf` | needs physical alarm terminals | 3 |
@@ -278,7 +278,7 @@ entry by entry.
 network, alarm, record, video and image, each entry suffixed `_rw` or `_ro`. It is a
 **per-user permission list, not a hardware list**: all eight cameras here return an
 identical 35 entries despite being three different models with visibly different hardware.
-It answers "may this user change the LED state", not "does this camera have a speaker".
+It answers "may the logged-in account change the LED state", not "does this camera have a speaker".
 
 So `AbilityInfo` cannot be used to decide whether a feature exists. Its value is the
 read/write split, which is real and which the HTTP list does not give.

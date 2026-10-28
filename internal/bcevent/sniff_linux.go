@@ -45,7 +45,7 @@ type Sniffer struct {
 	Debug bool
 }
 
-// Run captures until ctx is cancelled, calling fn for every valid cf31 event.
+// Run captures until ctx is canceled, calling fn for every valid cf31 event.
 // fn runs on the capture goroutine, so it must not block for long; hand work
 // to a channel if it might.
 func (s *Sniffer) Run(ctx context.Context, fn func(Packet)) error {
@@ -84,7 +84,7 @@ func (s *Sniffer) Run(ctx context.Context, fn func(Packet)) error {
 			return fmt.Errorf("bcevent: promisc: %w", err)
 		}
 	}
-	// A 1s receive timeout lets the read loop notice a cancelled context
+	// A 1s receive timeout lets the read loop notice a canceled context
 	// without another goroutine racing to close the fd.
 	_ = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &unix.Timeval{Sec: 1})
 

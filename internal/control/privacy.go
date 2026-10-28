@@ -50,7 +50,7 @@ func parseMasks(doc []byte) ([]maskRect, int) {
 	var out []maskRect
 	// The list is a run of <Shelter> elements inside shelterList; each is
 	// cut out and read on its own so its fields cannot be confused with a
-	// neighbour's.
+	// neighbor's.
 	s := string(doc)
 	start := strings.Index(s, "<shelterList>")
 	end := strings.Index(s, "</shelterList>")
@@ -193,6 +193,49 @@ func (s *Server) serveMask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	s.setFlash(w, r, flashFor(subject, result))
+	s.setFlash(w, r, flashFor(subject, checkMasks(result, rects)))
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }
+
+// checkMasks settles an accepted mask write by the boxes themselves. The
+// byte-for-byte check in outcomeFor can never pass here, because the camera
+// reads masks back as shelterList while the write is ShelterList, so every
+// save would otherwise be reported as unconfirmed even when it took.
+func checkMasks(result WriteResult, want []maskRect) WriteResult {
+	if result.Outcome != "accepted" || len(result.After) == 0 {
+		return result
+	}
+	got, _ := parseMasks(result.After)
+	if masksEqual(got, want) {
+		result.Outcome = "confirmed"
+		result.Detail = fmt.Sprintf("confirmed: read back on a fresh connection, the camera holds %d box(es) as drawn.", len(want))
+		return result
+	}
+	result.Outcome = "refused"
+	result.Detail = fmt.Sprintf("the camera answered OK but did not keep it: it holds %d box(es), %d were drawn.", len(got), len(want))
+	return result
+}
+
+// masksEqual compares boxes within the rounding the camera's fractions
+// allow; the order the camera lists them in does not matter.
+func masksEqual(a, b []maskRect) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	used := make([]bool, len(b))
+	for _, x := range a {
+		found := false
+		for j, y := range b {
+			if !used[j] && near(x.X, y.X) && near(x.Y, y.Y) && near(x.W, y.W) && near(x.H, y.H) {
+				used[j], found = true, true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func near(a, b float64) bool { return math.Abs(a-b) < 0.01 }

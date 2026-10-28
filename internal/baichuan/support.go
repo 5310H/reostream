@@ -12,7 +12,7 @@ import (
 // `talk` on cameras with no speaker, and Baichuan's AbilityInfo is a per-user
 // permission list that reads identically across every model.
 //
-// Checked against behaviour established the slow way on eight cameras:
+// Checked against behavior established the slow way on eight cameras:
 // AudioTalk is 1 on exactly the two that make a sound and 0 on the six that
 // accept a talk session once and then refuse forever, and NoExternStream is 1
 // on exactly the one camera that answers a balanced stream request with
@@ -135,11 +135,15 @@ func (s Support) HasPTZ() bool { return s.Support.PTZMode != "" && s.Support.PTZ
 // floodlight control on cameras that have no floodlight, which is what
 // happened.
 //
-// ledCtrl does answer it: 0 on the fisheye, 38 on the pano. Nonzero means
-// present in some form, per this type's own warning about magnitudes.
+// ledCtrl answers it, but as bits, not as zero or not: 0 on the fisheye,
+// 38 (bits 1, 2, 5) on the pano and the TrackMix, 4111 (bits 0-3, 12) on
+// the Argus PT Ultra, all three with a white light, and 64 (bit 6 alone)
+// on the RLC-810A, which has none and was being offered floodlight
+// controls (click test, 10-27). Bits 1 and 2 are what every camera here
+// with a white light has and the others lack.
 func (s Support) HasFloodlight(id int) bool {
 	ch, ok := s.Channel(id)
-	return ok && ch.LEDCtrl != 0
+	return ok && ch.LEDCtrl&0x6 != 0
 }
 
 // HasFishEye reports whether channel id has the dewarping view modes that

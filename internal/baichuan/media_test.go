@@ -17,8 +17,8 @@ func buildFrame(magic []byte, hdrLen int, codec string, micros uint32, payload [
 	return append(b, payload...)
 }
 
-func TestDepacketiserEmitsAnIFrame(t *testing.T) {
-	d := NewDepacketiser()
+func TestDepacketizerEmitsAnIFrame(t *testing.T) {
+	d := NewDepacketizer()
 	d.Write(buildFrame(magicIFrame, 32, "H265", 1234, []byte("videodata")), true)
 	f, ok := d.Next()
 	if !ok {
@@ -40,8 +40,8 @@ func TestDepacketiserEmitsAnIFrame(t *testing.T) {
 
 // The TrackMix zoom lens is channel 1, and its video packets say so in the
 // magic's first digit: "10dc" for an I frame, "11dc" for a P frame.
-func TestDepacketiserReadsChannelOneVideo(t *testing.T) {
-	d := NewDepacketiser()
+func TestDepacketizerReadsChannelOneVideo(t *testing.T) {
+	d := NewDepacketizer()
 	for _, want := range []struct {
 		magic string
 		hdr   int
@@ -60,14 +60,14 @@ func TestDepacketiserReadsChannelOneVideo(t *testing.T) {
 }
 
 // A media packet may straddle message boundaries.
-func TestDepacketiserWaitsForASplitFrame(t *testing.T) {
+func TestDepacketizerWaitsForASplitFrame(t *testing.T) {
 	payload := make([]byte, 5000)
 	for i := range payload {
 		payload[i] = byte(i)
 	}
 	full := buildFrame(magicIFrame, 32, "H264", 7, payload)
 
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	d.Write(full[:1000], true)
 	if _, ok := d.Next(); ok {
 		t.Fatal("emitted a frame before all of it arrived")
@@ -83,10 +83,10 @@ func TestDepacketiserWaitsForASplitFrame(t *testing.T) {
 }
 
 // The real proof: decode the captured stream end to end.
-func TestDepacketiserOnRealCapture(t *testing.T) {
+func TestDepacketizerOnRealCapture(t *testing.T) {
 	b := loadFixture(t, "stream_s2c.bin")
 	r := NewReader(bytes.NewReader(b))
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 
 	var iframes, pframes, audio int
 	var lastMicros uint32
@@ -149,7 +149,7 @@ func TestDepacketiserOnRealCapture(t *testing.T) {
 		t.Errorf("codec = %q, want H264 or H265", codec)
 	}
 	if d.Skipped() > 0 {
-		t.Errorf("resynchronised %d times; the stream should parse cleanly", d.Skipped())
+		t.Errorf("resynchronized %d times; the stream should parse cleanly", d.Skipped())
 	}
 }
 
@@ -159,7 +159,7 @@ func TestDepacketiserOnRealCapture(t *testing.T) {
 // prefix bytes off every frame: on the fisheye that was 104 to 184 bytes,
 // enough to corrupt the bottom macroblock rows of every picture while the
 // stream otherwise looked healthy.
-func TestDepacketiserAccountsForAFramePrefix(t *testing.T) {
+func TestDepacketizerAccountsForAFramePrefix(t *testing.T) {
 	prefix := bytes.Repeat([]byte{0xAB}, 104)
 	// 0x65 is an IDR slice header and 0x41 a non-IDR one. The picture bytes
 	// have to begin with a NAL header the parser accepts: it now validates
@@ -173,7 +173,7 @@ func TestDepacketiserAccountsForAFramePrefix(t *testing.T) {
 	first := buildFrame(magicIFrame, 32, "H264", 1, picture)
 	first = append(first[:32], append(prefix, picture...)...)
 
-	d := NewDepacketiser()
+	d := NewDepacketizer()
 	d.Write(append(first, buildFrame(magicPFrame, 24, "H264", 2, second)...), true)
 
 	f, ok := d.Next()
@@ -200,8 +200,8 @@ func TestDepacketiserAccountsForAFramePrefix(t *testing.T) {
 
 // A video packet still short of its declared size when the next packet
 // starts was cut off: it is counted lost, not as filler (#17).
-func TestDepacketiserCountsACutVideoPacketAsLost(t *testing.T) {
-	d := NewDepacketiser()
+func TestDepacketizerCountsACutVideoPacketAsLost(t *testing.T) {
+	d := NewDepacketizer()
 	pkt := make([]byte, 24+100)
 	copy(pkt, "01dcH264")
 	binary.LittleEndian.PutUint32(pkt[8:], 100)

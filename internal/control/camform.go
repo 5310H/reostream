@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -87,6 +88,14 @@ func applyCameraForm(cfg *config.Config, form url.Values) error {
 		Streams:  form["streams"],
 		RTSP:     form["rtsp"],
 		UID:      strings.TrimSpace(form.Get("uid")),
+	}
+	// A camera on an NVR or Home Hub channel, added from the scan.
+	if v := strings.TrimSpace(form.Get("channel")); v != "" {
+		ch, err := strconv.Atoi(v)
+		if err != nil || ch < 0 {
+			return fmt.Errorf("control: channel %q is not a channel number", v)
+		}
+		cam.Channel = ch
 	}
 	// The page has no RTSP field. With RTSP on, serve every stream the
 	// camera pulls; reading the missing field as "none" dropped the

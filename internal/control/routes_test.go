@@ -117,7 +117,7 @@ func TestEveryRouteExceptLoginIsAuthenticated(t *testing.T) {
 // session and must not carry anything drawn from this install.
 func TestAssetsAreServedWithoutASession(t *testing.T) {
 	// A distinctive name, not "one": the check below is a substring
-	// search across files that include vendored JavaScript and a licence,
+	// search across files that include vendored JavaScript and a license,
 	// and a common word would match by coincidence rather than by leak.
 	const cameraName = "qv7-marker-cam"
 	s := newTestServer(t, Options{Password: "hunter2", ConfigPath: writeTestConfig(t, cameraName)})

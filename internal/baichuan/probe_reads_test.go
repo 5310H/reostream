@@ -49,9 +49,9 @@ func TestDialCapturesDeviceInfo(t *testing.T) {
 	}
 }
 
-// The whole point of ErrUnauthorised: a caller has to be able to name a
+// The whole point of ErrUnauthorized: a caller has to be able to name a
 // rejected credential, not just see that Dial failed.
-func TestDialWrapsErrUnauthorisedOnAnEmptyLoginReply(t *testing.T) {
+func TestDialWrapsErrUnauthorizedOnAnEmptyLoginReply(t *testing.T) {
 	const nonce = "doc-example-0000000000000000"
 	cam := fakecam.New(t, synthesizeLoginFailureFixture(nonce))
 
@@ -59,8 +59,8 @@ func TestDialWrapsErrUnauthorisedOnAnEmptyLoginReply(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	if !errors.Is(err, ErrUnauthorised) {
-		t.Errorf("err = %v, want it to wrap ErrUnauthorised", err)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("err = %v, want it to wrap ErrUnauthorized", err)
 	}
 }
 

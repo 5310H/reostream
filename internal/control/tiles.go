@@ -1,9 +1,10 @@
 package control
 
 import (
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/VoltTech21/reostream/internal/config"
 )
 
 // browserPlayable is the codec set a browser will decode from an MPEG-TS
@@ -119,9 +120,16 @@ func (s *Server) tiles() []tile {
 	for cam := range byCam {
 		names = append(names, cam)
 	}
-	sort.Strings(names)
+	s.sortByConfig(names)
 	out := make([]tile, 0, len(names))
+	always := s.alwaysOnCameras()
 	for _, cam := range names {
+		if s.onDemand(cam) && always[cam] {
+			// Streaming around the clock already: a viewer costs the
+			// camera nothing, so the tile plays live like a wired one's.
+			out = append(out, tile{Camera: cam, Playable: true, URL: streamPrefix + "/" + cam + "_sub.ts"})
+			continue
+		}
 		if s.onDemand(cam) {
 			// Always through this page's own signed-in mount: the public
 			// listener refuses a battery camera's stream.
@@ -162,6 +170,22 @@ func (s *Server) onDemand(camera string) bool {
 	}
 	h, ok := s.opts.Hubs.Hub(camera + "/sub")
 	return ok && h.OnDemand()
+}
+
+// alwaysOnCameras names the battery cameras the config keeps streaming
+// around the clock (always_on).
+func (s *Server) alwaysOnCameras() map[string]bool {
+	out := map[string]bool{}
+	cfg, err := config.Load(s.opts.ConfigPath)
+	if err != nil {
+		return out
+	}
+	for _, c := range cfg.Cameras {
+		if c.AlwaysOn {
+			out[c.Name] = true
+		}
+	}
+	return out
 }
 
 // stillTime is when a still was taken, as short as it can be read: the

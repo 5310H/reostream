@@ -3,7 +3,7 @@
 //
 // A camera's main, sub and extern streams are independent Baichuan
 // connections, so they run on separate goroutines rather than being
-// serialised behind one lock per camera; a stall on one must never delay
+// serialized behind one lock per camera; a stall on one must never delay
 // the others.
 package supervisor
 
@@ -30,7 +30,7 @@ import (
 // silently duplicating the fleet.
 var ErrAlreadyRunning = errors.New("supervisor: already running")
 
-// Runner runs one camera stream until ctx is cancelled or it fails. It is a
+// Runner runs one camera stream until ctx is canceled or it fails. It is a
 // parameter rather than a hard call to stream.Run so the supervisor can be
 // tested without a camera.
 type Runner func(ctx context.Context, cfg stream.Config, h *hub.Hub) error
@@ -153,6 +153,10 @@ type Supervisor struct {
 	// stillDir keeps battery cameras' last pictures across restarts.
 	stillDir string
 
+	// motionHook hears motion from battery cameras' wakes. See
+	// SetMotionHook.
+	motionHook func(camera string, on bool)
+
 	// runCtx is Run's context, the parent of every per-entry context, so a
 	// stream started after Run still stops when the process shuts down.
 	runCtx context.Context
@@ -160,7 +164,7 @@ type Supervisor struct {
 	mu      sync.Mutex
 	entries map[string]*entry
 
-	// reloadMu serialises whole Reload calls, separately from mu. mu guards
+	// reloadMu serializes whole Reload calls, separately from mu. mu guards
 	// the maps for short critical sections, including HTTP status reads, and
 	// must never be held across the blocking stop phase; reloadMu is held
 	// across exactly that phase, because two interleaved Reload calls would
@@ -174,6 +178,11 @@ type Supervisor struct {
 	// Taking mu for the whole call instead of a dedicated lock would
 	// deadlock the status endpoint behind a camera round trip.
 	reloadMu sync.Mutex
+
+	// failures is each failing camera's state, so its log says so once
+	// and then stays quiet; see failures.go.
+	failMu   sync.Mutex
+	failures map[string]*camFailure
 }
 
 // New builds a Supervisor for cams, using run to drive each stream. Nothing
@@ -228,6 +237,7 @@ func newEntry(cam config.Camera, st string) *entry {
 			UID:      cam.UID,
 
 			HoldPicture: cam.HoldPicture,
+			Rotate:      cam.Rotate,
 		},
 		h:        h,
 		stat:     StreamStat{Camera: cam.Name, Stream: st, OnDemand: onDemand},
@@ -319,7 +329,7 @@ func (s *Supervisor) applySinkLocked(e *entry) {
 // share the package, can reach into a Supervisor to shorten them, and only
 // before Run starts. It panics if called after start rather than taking a
 // lock and letting a live Supervisor be retuned mid-run: the values are
-// read without synchronisation for the whole life of each stream goroutine,
+// read without synchronization for the whole life of each stream goroutine,
 // snapshotting or locking around every read would cost every stream a lock
 // operation per cycle forever to protect a knob that is only ever set once,
 // in a test, before anything is running.
@@ -373,7 +383,7 @@ type ReloadResult struct {
 var ErrNotRunning = errors.New("supervisor: not running")
 
 // ErrShuttingDown is returned by Reload once Run's context has been
-// cancelled. Run's final wait (see Run) only waits for entries still in the
+// canceled. Run's final wait (see Run) only waits for entries still in the
 // map at the moment it checks; a Reload allowed to start after ctx is
 // already done could still be mid-diff or mid-stop when Run returns and the
 // process exits out from under it, which is exactly what leaves a
@@ -562,7 +572,7 @@ func sameStream(e *entry, cam config.Camera) bool {
 }
 
 // Run starts one goroutine per configured stream and blocks until ctx is
-// cancelled and every one of them has finished closing.
+// canceled and every one of them has finished closing.
 //
 // Run may only be called once. A second concurrent call would spawn a
 // second goroutine per entry, which is a second connection to every stream
@@ -595,7 +605,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	// its entire call, including that stop phase (see Reload's own
 	// comment on why the stop happens outside mu), and it removes an
 	// entry from s.entries before stopping it; without this, a Reload that
-	// began just before ctx was cancelled can have already removed an
+	// began just before ctx was canceled can have already removed an
 	// entry this snapshot would otherwise miss, and Run would return while
 	// that entry's stream-stop message is still in flight on another
 	// goroutine the process is about to kill. A Reload that has not yet
@@ -648,7 +658,7 @@ func (s *Supervisor) stopEntry(e *entry) {
 
 // runStream is the one goroutine that owns a single camera stream for its
 // entire life: it runs, waits for that call to fully return, backs off, and
-// runs again, until ctx is cancelled. There is exactly one call to s.run in
+// runs again, until ctx is canceled. There is exactly one call to s.run in
 // flight for this stream at any time, which is the invariant the whole
 // supervisor exists to hold: a camera allows only one connection per
 // stream, and a second one gets a session that delivers nothing and blocks
@@ -661,9 +671,9 @@ func (s *Supervisor) runStream(ctx context.Context, e *entry) {
 	backoff := s.backoffStart
 	for {
 		if ctx.Err() != nil {
-			// Covers a context that was already cancelled before this
+			// Covers a context that was already canceled before this
 			// goroutine got scheduled, not just the check further down: an
-			// already-cancelled ctx handed to Run must not leak this hub's
+			// already-canceled ctx handed to Run must not leak this hub's
 			// subscribers either.
 			e.h.Close()
 			return
@@ -674,7 +684,26 @@ func (s *Supervisor) runStream(ctx context.Context, e *entry) {
 		s.mu.Lock()
 		e.stat.started = start
 		s.mu.Unlock()
+		// A failing camera coming back is noticed as soon as this run
+		// delivers, not when it next ends.
+		running := make(chan struct{})
+		go func(cam string) {
+			t := time.NewTicker(time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-running:
+					return
+				case <-t.C:
+					if !e.h.Stats().ConnectedAt.IsZero() {
+						s.noteRecovered(cam)
+						return
+					}
+				}
+			}
+		}(e.cfg.Name)
 		err := s.run(ctx, e.cfg, e.h)
+		close(running)
 		ran := time.Since(start)
 		s.setResult(e, err)
 
@@ -720,9 +749,8 @@ func (s *Supervisor) runStream(ctx context.Context, e *entry) {
 		// log to say when it started or how often: during the fleet cutover
 		// two streams sat at 19 restarts with an empty container log, which
 		// told an operator nothing about what to fix.
-		if err != nil {
-			log.Printf("reostream: %s: %v; reconnecting in %s",
-				hubName(e.cfg.Name, e.cfg.Stream), err, backoff)
+		if err != nil && ctx.Err() == nil {
+			s.noteFailure(e.cfg.Name, err)
 		}
 
 		select {

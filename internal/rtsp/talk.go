@@ -26,18 +26,38 @@ type TalkSession interface {
 }
 
 // backChannelMedia is what a stream offers a client that asks for an ONVIF
-// back channel: G.711 at 8 kHz, in both laws. That is what go2rtc, and so
-// Frigate's talk button, sends without transcoding, since browsers speak it
-// natively over WebRTC.
+// back channel. 16 bit PCM at 16 kHz comes first: it is the camera's own
+// talk rate, so nothing is lost on the way, and go2rtc sends it ("PCM")
+// when asked. G.711 at 8 kHz, in both laws, follows for clients that only
+// speak that, which is what Frigate's talk button sends by default since
+// browsers speak it natively over WebRTC; going through 8 kHz is what made
+// talk sound a little rough (a tester's E1 Zoom report, 10-27).
 func backChannelMedia() *description.Media {
 	return &description.Media{
 		Type:          description.MediaTypeAudio,
 		IsBackChannel: true,
 		Formats: []format.Format{
+			&format.LPCM{PayloadTyp: 96, BitDepth: 16, SampleRate: 16000, ChannelCount: 1},
 			&format.G711{PayloadTyp: 0, MULaw: true, SampleRate: 8000, ChannelCount: 1},
 			&format.G711{PayloadTyp: 8, MULaw: false, SampleRate: 8000, ChannelCount: 1},
 		},
 	}
+}
+
+// talkAudio is one packet's worth of speech and the rate it was sent at.
+type talkAudio struct {
+	rate int
+	pcm  []int16
+}
+
+// decodeL16 turns one RTP payload of 16 bit linear PCM, which RTP carries
+// big-endian, into samples.
+func decodeL16(payload []byte) []int16 {
+	out := make([]int16, len(payload)/2)
+	for i := range out {
+		out[i] = int16(binary.BigEndian.Uint16(payload[i*2:]))
+	}
+	return out
 }
 
 // decodeG711 turns one RTP payload into PCM.
@@ -77,7 +97,7 @@ const talkPing = 5 * time.Second
 type backChannel struct {
 	name   string
 	talker Talker
-	audio  chan []int16
+	audio  chan talkAudio
 	stop   chan struct{}
 	once   sync.Once
 	done   chan struct{}
@@ -88,7 +108,7 @@ func newBackChannel(name string, t Talker) *backChannel {
 		name:   name,
 		talker: t,
 		// 128 packets of 20 ms is about two and a half seconds.
-		audio: make(chan []int16, 128),
+		audio: make(chan talkAudio, 128),
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
@@ -96,10 +116,23 @@ func newBackChannel(name string, t Talker) *backChannel {
 	return b
 }
 
-// packet takes one RTP payload. It never blocks; a backlog drops audio.
-func (b *backChannel) packet(f *format.G711, payload []byte) {
+// packet takes one RTP payload in format f. It never blocks; a backlog
+// drops audio.
+func (b *backChannel) packet(f format.Format, payload []byte) {
+	var a talkAudio
+	switch f := f.(type) {
+	case *format.G711:
+		a = talkAudio{rate: 8000, pcm: decodeG711(f, payload)}
+	case *format.LPCM:
+		if f.BitDepth != 16 || f.ChannelCount != 1 {
+			return
+		}
+		a = talkAudio{rate: f.SampleRate, pcm: decodeL16(payload)}
+	default:
+		return
+	}
 	select {
-	case b.audio <- decodeG711(f, payload):
+	case b.audio <- a:
 	default:
 	}
 }
@@ -134,7 +167,7 @@ func (b *backChannel) run() {
 		select {
 		case <-b.stop:
 			return
-		case pcm := <-b.audio:
+		case a := <-b.audio:
 			if sess == nil {
 				if time.Now().Before(retryAt) {
 					continue
@@ -154,10 +187,10 @@ func (b *backChannel) run() {
 					retryAt = time.Now().Add(10 * time.Second)
 					continue
 				}
-				log.Printf("rtsp: %s: talk started", b.name)
+				log.Printf("rtsp: %s: talk started (%d Hz from the client)", b.name, a.rate)
 				sess = s
 			}
-			if err := sess.Write(8000, pcm); err != nil {
+			if err := sess.Write(a.rate, a.pcm); err != nil {
 				log.Printf("rtsp: %s: talk: %v", b.name, err)
 				release()
 				continue

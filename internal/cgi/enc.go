@@ -83,8 +83,8 @@ type EncOptions struct {
 type encStreamRangeJSON struct {
 	BitRate   []int                  `json:"bitRate"`
 	FrameRate []int                  `json:"frameRate"`
-	Profile   []string               `json:"profile"`
-	VType     []string               `json:"vType"`
+	Profile   stringList             `json:"profile"`
+	VType     stringList             `json:"vType"`
 	Size      string                 `json:"size"`
 	Width     int                    `json:"width"`
 	Height    int                    `json:"height"`
@@ -94,6 +94,26 @@ type encStreamRangeJSON struct {
 		FrameRate int `json:"frameRate"`
 		GOP       int `json:"gop"`
 	} `json:"default"`
+}
+
+// stringList is a list the camera may also send as one bare string: the
+// RLC-810A's range says "vType": "h265" where the pano says ["h264","h265"],
+// and a strict []string turned that into a decode error that left the
+// whole Encoding page blank.
+type stringList []string
+
+func (l *stringList) UnmarshalJSON(b []byte) error {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		*l = stringList{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return err
+	}
+	*l = many
+	return nil
 }
 
 func (j encStreamRangeJSON) options() EncStreamOptions {

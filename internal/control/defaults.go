@@ -22,7 +22,7 @@ import (
 
 // cgiCorner is the CGI API's name for each corner an overlay can sit in,
 // spaces removed: an RLC-810A reports "LowerRight" and "TopCenter".
-// Bottom centre has no Baichuan pair, so a camera defaulting there gets no
+// Bottom center has no Baichuan pair, so a camera defaulting there gets no
 // reset.
 var cgiCorner = map[string]string{
 	"UpperLeft":   "top left",
@@ -48,10 +48,10 @@ var cgiDayNight = map[string]string{
 // readDefaults asks the camera for the factory values of the curated fields
 // it can map, keyed by each field's primary XPath. Any read that fails
 // simply contributes nothing.
-func readDefaults(ctx context.Context, c *cgi.Client) map[string]string {
+func readDefaults(ctx context.Context, c *cgi.Client, channel int) map[string]string {
 	out := map[string]string{}
 
-	if _, initial, _, err := c.Get(ctx, "GetImage", 0); err == nil {
+	if _, initial, _, err := c.Get(ctx, "GetImage", channel); err == nil {
 		var v struct {
 			Image map[string]json.Number `json:"Image"`
 		}
@@ -68,7 +68,7 @@ func readDefaults(ctx context.Context, c *cgi.Client) map[string]string {
 		}
 	}
 
-	if _, initial, _, err := c.Get(ctx, "GetOsd", 0); err == nil {
+	if _, initial, _, err := c.Get(ctx, "GetOsd", channel); err == nil {
 		var v struct {
 			Osd struct {
 				OsdChannel *struct {
@@ -105,7 +105,7 @@ func readDefaults(ctx context.Context, c *cgi.Client) map[string]string {
 		}
 	}
 
-	if _, initial, _, err := c.Get(ctx, "GetIsp", 0); err == nil {
+	if _, initial, _, err := c.Get(ctx, "GetIsp", channel); err == nil {
 		var v struct {
 			Isp struct {
 				DayNight  string `json:"dayNight"`

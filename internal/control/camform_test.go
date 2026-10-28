@@ -290,7 +290,10 @@ func TestFormEditKeepsAHubCamerasChannel(t *testing.T) {
 
 // Camera settings address channel 0 on every path, which behind a hub is a
 // different camera, so a hub camera's settings page must refuse outright.
-func TestSettingsRefuseAHubCamera(t *testing.T) {
+// A camera behind a hub or NVR has its own settings, reached through the
+// recorder on its channel, but the whole-device pages (clock, ports) would
+// change the recorder, so those still refuse it.
+func TestHubCameraSettingsButNotDeviceSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	text := "[control]\nlisten = \"127.0.0.1:0\"\npassword = \"abcdefghijklmnop\"\n\n" +
 		"[[camera]]\nname = \"yard\"\naddress = \"192.0.2.9\"\nchannel = 1\nstreams = [\"main\"]\n\n" +
@@ -299,11 +302,14 @@ func TestSettingsRefuseAHubCamera(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Server{opts: Options{ConfigPath: path}}
-	if _, err := s.byName("yard"); err == nil || !strings.Contains(err.Error(), "channel 1") {
-		t.Fatalf("byName(hub camera) = %v, want a refusal naming the channel", err)
+	if cam, err := s.byName("yard"); err != nil || cam.Channel != 1 {
+		t.Fatalf("byName(hub camera) = %+v, %v; want the camera with channel 1", cam, err)
 	}
-	if _, err := s.byName("porch"); err != nil {
-		t.Fatalf("byName(standalone camera) = %v", err)
+	if _, err := s.byNameDirect("yard"); err == nil || !strings.Contains(err.Error(), "channel 1") {
+		t.Fatalf("byNameDirect(hub camera) = %v, want a refusal naming the channel", err)
+	}
+	if _, err := s.byNameDirect("porch"); err != nil {
+		t.Fatalf("byNameDirect(standalone camera) = %v", err)
 	}
 }
 

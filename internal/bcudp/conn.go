@@ -37,6 +37,8 @@ type Conn struct {
 	sock     *net.UDPConn
 	remote   *net.UDPAddr
 	cid, did uint32
+	// ip is the address dialled, noted as ours until Close. See Ours.
+	ip net.IP
 
 	mu        sync.Mutex
 	nextID    uint32
@@ -79,11 +81,14 @@ func dial(ctx context.Context, host, uid string, ports []int) (*Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bcudp: listen: %w", err)
 	}
+	oursOpen(ip)
 	c, err := connect(ctx, sock, ip, uid, ports)
 	if err != nil {
+		oursClosed(ip)
 		sock.Close()
 		return nil, err
 	}
+	c.ip = ip
 	return c, nil
 }
 
@@ -417,6 +422,9 @@ func (c *Conn) Close() error {
 		}
 		err = c.sock.Close()
 		c.wg.Wait()
+		if c.ip != nil {
+			oursClosed(c.ip)
+		}
 	})
 	return err
 }

@@ -24,7 +24,7 @@ func isHEVCIRAPType(nalType byte) bool {
 // videoAccessUnitNALTypes walks chunk as whole 188 byte transport packets,
 // reassembles the first video access unit found (from its PES start packet
 // through every following PIDVideo payload packet, the same span
-// ts.Muxer.packetisePES produced it from), and returns every HEVC NAL type
+// ts.Muxer.packetizePES produced it from), and returns every HEVC NAL type
 // present in it.
 //
 // This is a direct MPEG-TS/PES parse, not a call into internal/ts: the
@@ -110,7 +110,7 @@ func nalTypes(es []byte) []byte {
 // seconds before recovering at the next keyframe.
 //
 // This drives the real pipeline, baichuan.Dial through a fakecam, the real
-// depacketiser, and the real ts.Muxer, but does it single threaded rather
+// depacketizer, and the real ts.Muxer, but does it single threaded rather
 // than through stream.Run: the fixture has no real time pacing (fakecam
 // hands the whole capture to the kernel in one Write), so a second
 // goroutine racing to subscribe "mid stream" would not reliably land
@@ -137,7 +137,7 @@ func TestLateSubscriberFirstBytesBeginAtAKeyframe(t *testing.T) {
 	}
 
 	h := hub.New(256)
-	d := baichuan.NewDepacketiser()
+	d := baichuan.NewDepacketizer()
 	var mux *ts.Muxer
 	var iframes int
 	var late <-chan []byte

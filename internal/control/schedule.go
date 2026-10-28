@@ -135,7 +135,7 @@ type schedSection struct {
 	Err                 string
 }
 
-// schedView is one table, labelled.
+// schedView is one table, labeled.
 type schedView struct {
 	Type  string
 	Index int

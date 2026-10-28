@@ -136,7 +136,7 @@ func TestDefaultsComeFromTheCamerasOwnInitialValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := readDefaults(context.Background(), c)
+	got := readDefaults(context.Background(), c, 0)
 	want := map[string]string{
 		"VideoInput/bright":       "128",
 		"VideoInput/contrast":     "128",

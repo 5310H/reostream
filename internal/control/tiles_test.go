@@ -1,6 +1,13 @@
 package control
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/VoltTech21/reostream/internal/hub"
+	"github.com/VoltTech21/reostream/internal/server"
+)
 
 func TestTileURLDefaultsToTheSameOriginMount(t *testing.T) {
 	// An empty StreamBase must resolve against this page's own /stream/
@@ -12,7 +19,7 @@ func TestTileURLDefaultsToTheSameOriginMount(t *testing.T) {
 	}
 }
 
-func TestTileURLHonoursAnExplicitBase(t *testing.T) {
+func TestTileURLHonorsAnExplicitBase(t *testing.T) {
 	if got := tileURL("http://192.0.2.10:8560", "/gate_sub.ts"); got != "http://192.0.2.10:8560/gate_sub.ts" {
 		t.Fatalf("tileURL with an explicit base = %q, want it used verbatim", got)
 	}
@@ -63,5 +70,42 @@ func TestPlayableStreamPrefersSubThenExtern(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A battery camera kept streaming around the clock plays live on its tile;
+// one that sleeps shows its last picture and waits to be pressed.
+func TestAlwaysOnBatteryTilePlaysLive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(`[[camera]]
+name = "argus"
+address = "192.0.2.10"
+uid = "95270000TESTUID1"
+password = "x"
+always_on = true
+
+[[camera]]
+name = "porch"
+address = "192.0.2.11"
+uid = "95270000TESTUID2"
+password = "x"
+`), 0o644)
+	hubs := map[string]*hub.Hub{}
+	for _, n := range []string{"argus/sub", "argus/main", "porch/sub", "porch/main"} {
+		h := hub.New(4)
+		h.SetOnDemand(true)
+		hubs[n] = h
+	}
+	s := &Server{opts: Options{ConfigPath: path, Hubs: server.StaticHubs(hubs)}}
+	got := map[string]tile{}
+	for _, tl := range s.tiles() {
+		got[tl.Camera] = tl
+	}
+	if a := got["argus"]; a.Battery || !a.Playable || a.StillNote != "" || a.URL != streamPrefix+"/argus_sub.ts" {
+		t.Fatalf("always-on tile %+v, want a live tile", a)
+	}
+	if p := got["porch"]; !p.Battery {
+		t.Fatalf("sleeping battery tile %+v lost its battery mode", p)
 	}
 }

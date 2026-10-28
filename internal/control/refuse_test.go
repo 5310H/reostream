@@ -21,7 +21,7 @@ func TestRefusedMessagesAreNeverWritable(t *testing.T) {
 	// mistake nobody can undo.
 	cases := []struct {
 		id   uint32
-		name string // the firmware's exact description, capitalisation included
+		name string // the firmware's exact description, capitalization included
 	}{
 		{baichuan.MsgIDSetAutoUpdate, "set auto update"}, // firmware
 		{baichuan.MsgIDReboot, "reboot"},                 // takes the camera off the fleet for a minute
@@ -75,14 +75,14 @@ func TestBatteryMessagesAreRefused(t *testing.T) {
 	}
 }
 
-// TestWriteBlockHonoursTheRefusal proves the guard lives in the write
+// TestWriteBlockHonorsTheRefusal proves the guard lives in the write
 // path, not only in whatever UI builds the write form. It calls
 // s.writeBlock directly against a refused id, using a camera address from
 // the documentation range (see writeTestConfig): if refused() were only
 // consulted by a template, writeBlock would try to dial that unreachable
 // address and this test would hang until probeTimeout instead of
 // returning immediately with outcome "refused".
-func TestWriteBlockHonoursTheRefusal(t *testing.T) {
+func TestWriteBlockHonorsTheRefusal(t *testing.T) {
 	s := newTestServer(t, Options{Password: "hunter2", ConfigPath: writeTestConfig(t, "cam1")})
 	cam, err := s.byName("cam1")
 	if err != nil {

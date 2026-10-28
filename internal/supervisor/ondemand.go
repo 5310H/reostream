@@ -11,7 +11,7 @@ import (
 
 // A battery camera runs on its battery for months only if it sleeps. Its
 // stream therefore runs only while a viewer is subscribed, and every limit
-// below errs towards letting it sleep: a viewer who wants more presses
+// below errs toward letting it sleep: a viewer who wants more presses
 // play again.
 var (
 	// wakeIdle is how long a session outlives its last viewer, so a
@@ -74,6 +74,10 @@ func wanted(e *entry) bool {
 // or when the session reaches wakeMax.
 func (s *Supervisor) runOnDemand(ctx context.Context, e *entry) {
 	defer e.h.Close()
+	// An always-on camera never sleeps, so its waking says nothing.
+	if e.cfg.Stream == "main" && !e.alwaysOn && e.cfg.Address != "" {
+		go s.watchWakes(ctx, e)
+	}
 	s.firstStill(ctx, e)
 	tick := time.NewTicker(wakePoll)
 	defer tick.Stop()
@@ -95,7 +99,7 @@ func (s *Supervisor) runOnDemand(ctx context.Context, e *entry) {
 			}
 			if err != nil && reason == "" {
 				fails++
-				log.Printf("reostream: %s: wake failed: %v", hubName(e.cfg.Name, e.cfg.Stream), err)
+				s.noteFailure(e.cfg.Name, err)
 				select {
 				case <-ctx.Done():
 					return
@@ -103,6 +107,7 @@ func (s *Supervisor) runOnDemand(ctx context.Context, e *entry) {
 				}
 				continue
 			}
+			s.noteRecovered(e.cfg.Name)
 			log.Printf("reostream: %s: back to sleep (%s)", hubName(e.cfg.Name, e.cfg.Stream), reason)
 			break
 		}
@@ -163,7 +168,11 @@ func (s *Supervisor) wakeSession(ctx context.Context, e *entry) (string, error) 
 	case e.h.Clients() == 0:
 		why = "motion"
 	}
-	log.Printf("reostream: %s: waking for %s", hubName(e.cfg.Name, e.cfg.Stream), why)
+	// Not repeated while the camera is failing: an always-on camera that
+	// cannot be reached would otherwise say it every few seconds.
+	if !s.failing(e.cfg.Name) {
+		log.Printf("reostream: %s: waking for %s", hubName(e.cfg.Name, e.cfg.Stream), why)
+	}
 	s.setRunning(e, true)
 	cfg := e.cfg
 	cfg.IdleTimeout = wakeIdleTimeout

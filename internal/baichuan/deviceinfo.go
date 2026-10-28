@@ -21,8 +21,14 @@ type DeviceInfo struct {
 		Type        string `xml:"type"`     // "ipc" on every camera captured so far
 		TypeInfo    string `xml:"typeInfo"` // "IPC"; same information, differently cased
 		ChannelNum  int    `xml:"channelNum"`
-		AudioNum    int    `xml:"audioNum"`
-		Resolution  struct {
+		// NeedRotate is set by firmware that encodes a picture sideways
+		// and expects the client to turn it back (the 16 MP NT17 boards'
+		// full resolution). Every build sends the element; only those set
+		// it non-zero. The value's meaning beyond "non-zero" has not been
+		// seen on the wire yet.
+		NeedRotate string `xml:"needRotate"`
+		AudioNum   int    `xml:"audioNum"`
+		Resolution struct {
 			Name   string `xml:"resolutionName"`
 			Width  int    `xml:"width"`
 			Height int    `xml:"height"`

@@ -20,7 +20,7 @@ const SamplesPerBlock = 1024
 // nibble per sample.
 const BlockBytes = 4 + SamplesPerBlock/2
 
-// stepTable is the IMA ADPCM quantiser ladder, 89 entries.
+// stepTable is the IMA ADPCM quantizer ladder, 89 entries.
 var stepTable = [89]int32{
 	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
 	50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
@@ -112,11 +112,16 @@ func (e *Encoder) EncodeBlock(pcm []int16) []byte {
 			s = pcm[i]
 		}
 		code := e.encodeSample(s)
-		// Two samples per byte, first sample in the low nibble.
+		// Two samples per byte, first sample in the HIGH nibble. The
+		// Reolink app's own talk packets are packed this way: decoded high
+		// nibble first, each block's preamble is exactly the state the
+		// previous block ended in. Low nibble first still sounds like
+		// speech, because each pair is only played in swapped order, but
+		// rough, which is how this was missed.
 		if i%2 == 0 {
-			out[4+i/2] = code
+			out[4+i/2] = code << 4
 		} else {
-			out[4+i/2] |= code << 4
+			out[4+i/2] |= code
 		}
 	}
 	return out
@@ -137,9 +142,9 @@ func Decode(block []byte) []int16 {
 		b := block[4+i/2]
 		var code int32
 		if i%2 == 0 {
-			code = int32(b & 0x0F)
-		} else {
 			code = int32(b >> 4)
+		} else {
+			code = int32(b & 0x0F)
 		}
 
 		step := stepTable[index]
@@ -169,7 +174,7 @@ func Decode(block []byte) []int16 {
 // FIRST sample in the HIGH nibble, starting from silence, with no block
 // preambles. This is the custom siren sound format (import audio, 261): the
 // Reolink app's own upload decodes cleanly this way and drifts the other
-// way, the opposite nibble order to a talk block.
+// way, the same nibble order as a talk block.
 func EncodeStream(pcm []int16) []byte {
 	var e Encoder
 	out := make([]byte, (len(pcm)+1)/2)

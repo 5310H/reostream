@@ -1,6 +1,7 @@
 package baichuan
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -152,7 +153,7 @@ func newConn(ctx context.Context, nc net.Conn, opts Options) (*Conn, error) {
 	// only once login succeeds and the dial deadline is cleared, which is
 	// safe to do without a lock: the field is written here, before
 	// readLoop's goroutine is started, and never written again, so the
-	// go statement's happens-before guarantee is all the synchronisation
+	// go statement's happens-before guarantee is all the synchronization
 	// this needs.
 	idleConn := &idleTimeoutConn{Conn: nc}
 	c := &Conn{
@@ -165,13 +166,13 @@ func newConn(ctx context.Context, nc net.Conn, opts Options) (*Conn, error) {
 		done:        make(chan struct{}),
 	}
 	// Login is plain blocking reads, so on its own it answers neither a
-	// cancelled ctx nor a camera that accepts the connection and then says
+	// canceled ctx nor a camera that accepts the connection and then says
 	// nothing. A stream's ctx has no deadline, and a camera that holds a
 	// second connection without answering it (one that allows only one
 	// stream at a time) left that stream's goroutine parked here forever:
 	// nothing logged, no retry, and stopping the stream -- removing the
 	// camera, editing it, shutting down -- waited on it for good. So login
-	// gets a deadline of its own when the caller gave none, and a cancelled
+	// gets a deadline of its own when the caller gave none, and a canceled
 	// ctx pulls the deadline in to now, which wakes the read.
 	lctx := ctx
 	if _, ok := ctx.Deadline(); !ok {
@@ -220,7 +221,7 @@ func (c *Conn) nextCounter() byte {
 	return c.counter
 }
 
-// ErrUnauthorised is what Dial returns when a camera's login reply carries
+// ErrUnauthorized is what Dial returns when a camera's login reply carries
 // no XML body.
 //
 // The wire gives no separate "wrong password" document: a rejected
@@ -230,7 +231,7 @@ func (c *Conn) nextCounter() byte {
 // the confusion a first time user hits when a typed password is wrong. This
 // sentinel is what lets a caller tell the two apart and say "authentication
 // failed" instead of "something is wrong with the network".
-var ErrUnauthorised = errors.New("baichuan: authentication rejected (empty login reply)")
+var ErrUnauthorized = errors.New("baichuan: authentication rejected (empty login reply)")
 
 // login performs the handshake observed on the wire: a zero-length
 // negotiation probe, the camera's nonce, a hashed login, then DeviceInfo.
@@ -268,14 +269,35 @@ func (c *Conn) login() error {
 	}
 	if len(reply.XML) == 0 {
 		return fmt.Errorf("%w (status %d, msgid %d, class 0x%04x, %d body bytes)",
-			ErrUnauthorised, reply.Header.Status(), reply.Header.MsgID, reply.Header.Class, len(reply.Payload))
+			ErrUnauthorized, reply.Header.Status(), reply.Header.MsgID, reply.Header.Class, len(reply.Payload))
 	}
-	c.deviceInfo = reply.XML
-
 	key := AESKey(nonce, c.opts.Password)
+	c.deviceInfo = loginReplyXML(reply, key)
+
 	c.r.SetAESKey(key)
 	c.w.SetAESKey(key)
 	return nil
+}
+
+// loginReplyXML is the login reply's DeviceInfo. Cameras seal it the old
+// way, but a Home Hub (BASE_WUNNT6NA5 v3.3.0.601, on emulation) already seals
+// it with the session's AES key, and read the old way it is binary noise: the
+// hub then went unrecognized as a recorder. The reader decoded it as the old
+// cipher, which is its own inverse, so undoing that gives the raw bytes back.
+func loginReplyXML(reply Message, key []byte) []byte {
+	if looksLikeXML(reply.XML) {
+		return reply.XML
+	}
+	raw := BCCrypt(reply.Header.EncOffset, reply.XML)
+	if out, err := AESDecrypt(key, raw); err == nil && looksLikeXML(out) {
+		return out
+	}
+	return reply.XML
+}
+
+func looksLikeXML(b []byte) bool {
+	b = bytes.TrimLeft(b, " \t\r\n\x00")
+	return len(b) > 0 && b[0] == '<'
 }
 
 // Nonce reports the login nonce.

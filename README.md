@@ -14,7 +14,7 @@ Reolink cameras --Baichuan--> reostream --RTSP--> go2rtc / Frigate / Blue Iris
 
 ## Why
 
-Reolink's RTSP server is broken on some models. On a Duo 3 it gave green blocks, grey
+Reolink's RTSP server is broken on some models. On a Duo 3 it gave green blocks, gray
 frames and smearing. Same camera, same encoder, same thirty minutes, both transports:
 
 | transport | segments | segments with bitstream errors |

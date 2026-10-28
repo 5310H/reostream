@@ -43,7 +43,7 @@ func TestThereIsNoRouteThatWritesCameraAccounts(t *testing.T) {
 // not just what the handler claims. The SetNtp handler fails the test
 // itself if port or interval arrive as anything but what GetNtp reported,
 // the same discipline fakeClockCamera's SetTime handler applies to "year"
-// below: an unmodelled field surviving the round trip is the thing under
+// below: an unmodeled field surviving the round trip is the thing under
 // test.
 type fakeNTPCamera struct {
 	srv      *httptest.Server
@@ -239,7 +239,7 @@ func TestServeTimeRendersNTPAndTheTimezoneForm(t *testing.T) {
 	// reads this.every.checked, so a page-wide search for "checked" would
 	// match the confirm gate and never the default it is meant to police.
 	for _, line := range strings.Split(html, "\n") {
-		if strings.Contains(line, `type="checkbox"`) && strings.Contains(line, "checked") {
+		if strings.Contains(line, `type="checkbox"`) && strings.Contains(line, `name="every"`) && strings.Contains(line, "checked") {
 			t.Errorf("an every-camera box ships checked; the default must be this camera only: %s", line)
 		}
 	}

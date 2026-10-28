@@ -211,7 +211,7 @@ func (s *Server) OnSetup(ctx *gortsplib.ServerHandlerOnSetupCtx) (*base.Response
 	return &base.Response{StatusCode: base.StatusOK}, st.serverStream(), nil
 }
 
-// OnPlay is where a reader starts counting. Packetisation is gated on the
+// OnPlay is where a reader starts counting. Packetization is gated on the
 // count, so a session that has set up but not played still costs nothing.
 func (s *Server) OnPlay(ctx *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
 	s.mu.RLock()
@@ -247,19 +247,21 @@ func (s *Server) listenBackChannel(ss *gortsplib.ServerSession, st *Stream) {
 	s.talking[ss] = bc
 	s.mu.Unlock()
 	for _, f := range back.Formats {
-		g, ok := f.(*format.G711)
-		if !ok {
+		switch f.(type) {
+		case *format.G711, *format.LPCM:
+		default:
 			continue
 		}
+		f := f
 		ss.OnPacketRTP(back, f, func(pkt *rtp.Packet) {
-			bc.packet(g, pkt.Payload)
+			bc.packet(f, pkt.Payload)
 		})
 	}
 }
 
 // OnSessionClose has to drop the reader whatever ended the session, which
 // includes a client that vanished without TEARDOWN. Leaving the count high
-// would keep packetising into a void for the life of the process.
+// would keep packetizing into a void for the life of the process.
 func (s *Server) OnSessionClose(ctx *gortsplib.ServerHandlerOnSessionCloseCtx) {
 	s.mu.Lock()
 	st := s.sessions[ctx.Session]

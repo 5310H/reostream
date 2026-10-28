@@ -177,6 +177,19 @@ type cameraPage struct {
 // SupportedCount, WantsParamsCount, AbsentCount and HungUpCount give
 // camera.html the per-class counts docs/control.md's own probe table
 // leads with, without asking the template to do arithmetic.
+// Shows reports whether the page draws the curated group with this title.
+// The Sound section uses it to leave out its own volume and alarm controls
+// where the Speaker and Siren on detection groups already draw them, so a
+// camera does not show two volume sliders for one speaker.
+func (p cameraPage) Shows(title string) bool {
+	for _, g := range p.Groups {
+		if g.Title == title {
+			return true
+		}
+	}
+	return false
+}
+
 func (p cameraPage) SupportedCount() int {
 	return p.countWhere(func(b BlockProbe) bool { return b.Supported })
 }
@@ -250,7 +263,7 @@ type positionOption struct {
 	Value    string
 	Selected bool
 	// Taken names the other overlay already in this corner (the camera
-	// cannot draw two there), so the corner is offered greyed out.
+	// cannot draw two there), so the corner is offered grayed out.
 	Taken string
 }
 
@@ -377,7 +390,7 @@ func (s *Server) serveCamera(w http.ResponseWriter, r *http.Request) {
 	if page.Support != nil && page.Support.HasFloodlight(0) {
 		if c, err := s.cgiDial(cam); err == nil {
 			ctx, cancel := context.WithTimeout(r.Context(), readTimeout*2)
-			if mode, state, err := readFloodlight(ctx, c); err == nil {
+			if mode, state, err := readFloodlight(ctx, c, cam.Channel); err == nil {
 				page.HasFloodlight = true
 				page.FloodlightCurrent = floodlightState(mode, state)
 			}
@@ -565,7 +578,7 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 			defer c.Close()
 			switch cat {
 			case "streams":
-				if enc, encErr := readEncoding(ctx, c); encErr != nil {
+				if enc, encErr := readEncoding(ctx, c, cam.Channel); encErr != nil {
 					page.Encoding.Err = fmt.Sprintf("could not read the encoding: %v", encErr)
 				} else {
 					page.Encoding = enc
@@ -573,7 +586,7 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 			case "view":
 				page.HasFishEye = page.Support != nil && page.Support.HasFishEye(0)
 				if page.HasFishEye {
-					if fe, err := readFisheye(ctx, c); err != nil {
+					if fe, err := readFisheye(ctx, c, cam.Channel); err != nil {
 						page.FishEyeErr = fmt.Sprintf("could not read the view mode: %v", err)
 					} else {
 						page.FishEyeCurrent = fisheyeValueByMode(int(fe.ImageType))
@@ -582,7 +595,7 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 			case "stitch":
 				page.HasStitch = page.Support != nil && page.Support.HasStitch(0)
 				if page.HasStitch {
-					if st, err := readStitch(ctx, c); err != nil {
+					if st, err := readStitch(ctx, c, cam.Channel); err != nil {
 						page.StitchErr = fmt.Sprintf("could not read the lens alignment: %v", err)
 					} else {
 						page.Stitch = st
@@ -592,27 +605,27 @@ func (s *Server) serveCameraSettings(w http.ResponseWriter, r *http.Request) {
 				// Hidden only on a positive no; see HasFloodlight.
 				page.HasFloodlight = page.Support == nil || page.Support.HasFloodlight(0)
 				if page.HasFloodlight {
-					if mode, state, readErr := readFloodlight(ctx, c); readErr != nil {
+					if mode, state, readErr := readFloodlight(ctx, c, cam.Channel); readErr != nil {
 						page.FloodlightErr = fmt.Sprintf("could not read the floodlight: %v", readErr)
 					} else {
 						page.FloodlightCurrent = floodlightState(mode, state)
 					}
 				}
 			case "audio":
-				page.Siren = readSiren(ctx, c)
-				if enc, err := readEncoding(ctx, c); err == nil {
+				page.Siren = readSiren(ctx, c, cam.Channel)
+				if enc, err := readEncoding(ctx, c, cam.Channel); err == nil {
 					page.Encoding = enc
 				}
 			}
 			if len(page.Groups) > 0 {
-				page.Defaults = readDefaults(ctx, c)
+				page.Defaults = readDefaults(ctx, c, cam.Channel)
 			}
 		}
 	} else if len(page.Groups) > 0 {
 		// The factory values for the reset buttons come over CGI too.
 		if c, err := s.cgiDial(cam); err == nil {
 			ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
-			page.Defaults = readDefaults(ctx, c)
+			page.Defaults = readDefaults(ctx, c, cam.Channel)
 			cancel()
 			c.Close()
 		}
@@ -629,6 +642,9 @@ func (s *Server) readGroups(ctx context.Context, conn *baichuan.Conn, page *came
 	var shown []Group
 	defer func() { page.Groups = shown }()
 	for _, g := range page.Groups {
+		if g.NeedsFloodlight && page.Support != nil && !page.Support.HasFloodlight(0) {
+			continue
+		}
 		pair, doc, failReason := resolveGroupBlock(ctx, conn, g)
 		if failReason != "" && g.Optional {
 			continue
