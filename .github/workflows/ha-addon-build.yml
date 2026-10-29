@@ -1,0 +1,55 @@
+name: Home Assistant add-on
+on:
+  pull_request:
+  push:
+    branches: [main, feature/haos-addon]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install PyYAML==6.0.2
+      - run: python scripts/check_ha_addon.py
+      - uses: frenck/action-addon-linter@v2
+        with:
+          path: ha-addon/reostream
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./... -race -timeout 20m
+      - name: Preserve standalone Docker build
+        run: docker build -t reostream-standalone .
+  image:
+    needs: [validate, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build using only the Supervisor add-on context
+        run: >-
+          docker build --build-arg BUILD_ARCH=${{ matrix.arch }}
+          -t reostream-addon:test ha-addon/reostream
+      - name: Exercise real image and persistent volume
+        run: python3 scripts/smoke_ha_addon.py reostream-addon:test
+# Images are intentionally not published: Supervisor builds this self-contained
+# context from an immutable application revision. No release credentials needed.
