@@ -14,3 +14,6 @@ consistency during backup.
 Removed obsolete Supervisor watchdog metadata and redundant defaults after
 full linter validation. Added Docker HTTP HEALTHCHECK and container health
 assertions; smoke checks now use host networking like the installed add-on.
+
+Use an Alpine Go build stage to reduce on-device build storage; the existing
+standalone Dockerfile remains unchanged.

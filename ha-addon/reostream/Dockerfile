@@ -1,5 +1,6 @@
 # Supervisor passes BUILD_ARCH; buildx also passes TARGETARCH.
-FROM golang:1.26.0-bookworm AS build
+FROM golang:1.26.0-alpine3.23 AS build
+RUN apk add --no-cache git
 ARG BUILD_ARCH
 ARG TARGETARCH
 # Deliberate immutable source pin, not an upstream image or a moving branch.
