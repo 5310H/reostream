@@ -1,5 +1,8 @@
 # Install and operate
 
+First check the [Home Assistant add-on requirements](REQUIREMENTS.md), including
+supported installations, CPU architecture, build access and network ports.
+
 Once this change is merged into the repository's default branch:
 
 1. Open Home Assistant Settings > Add-ons > Add-on Store (called Apps in newer
@@ -76,7 +79,10 @@ recordings stay on the camera. Logs and unclaimed tokens remain in memory.
 No configuration is generated or overwritten at startup.
 
 Private `/data` survives restarts, upgrades and container recreation and is
-included when this add-on is selected in a Home Assistant backup. Include the
+included when this add-on is selected in a Home Assistant backup. The package
+uses `backup: cold`: Supervisor stops it during backup so configuration and
+clips are copied while the daemon is stopped. Streaming and FTP reception are
+unavailable during that backup window. Include the
 add-on in backups, secure backups because they contain credentials, and test
 restore. FTP clips increase backup size and HAOS disk use; set clip retention
 in the UI. The existing receiver refuses new clips below 2 GiB free. Uninstall

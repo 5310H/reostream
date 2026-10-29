@@ -7,6 +7,7 @@ Date: 2026-10-29. Local host: Linux aarch64. Application source:
 | --- | --- |
 | `python3 scripts/check_ha_addon.py` | Passed: exact compiled-source match and Frigate example YAML |
 | YAML parsing, shell syntax, Python compile, `git diff --check` | Passed |
+| Requirements follow-up: experimental stage and cold backup metadata | Schema and source/version consistency checks passed; actual Supervisor backup remains unverified |
 | `go vet ./...` with Go 1.26.0 | Passed |
 | `go test ./... -timeout 20m` | Passed: all packages |
 | Static `CGO_ENABLED=0` Linux builds | Passed for amd64 and arm64; ELF architectures verified |

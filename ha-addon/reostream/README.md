@@ -9,6 +9,9 @@ and keeps application data in Supervisor's private storage. Installation needs
 internet access and enough RAM/disk for a Go build. Initial compilation can
 take several minutes on a Pi.
 
+Check the [Home Assistant requirements](REQUIREMENTS.md) before installing.
+The package is marked experimental until HAOS acceptance testing is complete.
+
 Read [installation and configuration](DOCS.md) and the
 [packaging investigation](../INVESTIGATION.md). HAOS and real-camera testing
 is pending; do not interpret the packaging as an end-to-end certification.
