@@ -15,7 +15,7 @@ assert f'io.hass.version="{config["version"]}"' in dockerfile
 assert f'control.version=ha-{config["version"]}-${{REOSTREAM_SOURCE}}' in dockerfile
 assert f'org.opencontainers.image.revision="{revision}"' in dockerfile
 assert config['host_network'] is True
-assert config['options'] == config['schema'] == {}
+assert config.get('options', {}) == config.get('schema', {}) == {}
 assert 'image' not in config, 'This package must build from its pinned source'
 # A later application change must update the pin and add-on version deliberately.
 subprocess.run(['git', 'diff', '--exit-code', revision, '--', 'go.mod', 'go.sum',

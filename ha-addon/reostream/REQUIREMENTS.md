@@ -50,11 +50,11 @@ records how the current package meets the Supervisor contract.
 | Build context | Self-contained add-on directory; Dockerfile fetches and verifies an exact application commit. No parent-directory COPY or moving source branch. |
 | Architectures | `amd64` and `aarch64`; Go maps the latter to `arm64`. Both static binary builds passed; both container builds still need CI. |
 | Runtime dependencies | Static Go application plus Alpine CA certificates, shell and su-exec. No GPU, USB device, ffmpeg or S6 requirement. |
-| Startup and shutdown | `startup: application`, `boot: auto`, Supervisor init, foreground exec and a 30-second shutdown timeout. Existing SIGTERM handling is preserved. |
-| Health monitoring | HTTP `watchdog` on `/api/status`; enable Watchdog in the add-on UI. It does not open a stream or wake a camera. |
+| Startup and shutdown | Default application startup, automatic boot and Supervisor init, foreground exec and a 30-second shutdown timeout. Existing SIGTERM handling is preserved. |
+| Health monitoring | Docker `HEALTHCHECK` on `/api/status`; enable Watchdog in the add-on UI. It does not open a stream or wake a camera. |
 | Persistent storage | Private Supervisor `/data`; application owns only `/data/reostream`. No shared host mounts. Config, credentials and FTP clips stay there. |
 | Backups | `backup: cold` stops the app during copying. Select this add-on in the backup; verify an actual Supervisor restore before declaring it tested. |
-| Configuration | Empty add-on `options`/`schema`; use the existing web UI. No duplicate camera/MQTT options or startup config rewrites. |
+| Configuration | Default empty add-on `options`/`schema`; use the existing web UI. No duplicate camera/MQTT options or startup config rewrites. |
 | Permissions | Default Protection mode and Docker AppArmor profile; no privileged flags, extra capabilities, devices, Docker socket or Supervisor/Core API access. A custom AppArmor profile is optional and has not been validated. |
 | Management UI | Normal HTTP management listener and `webui` link; existing authentication preserved. Ingress is optional and disabled pending compatibility tests. |
 | Network exposure | Host networking justified by broadcast discovery and UDP/FTP behavior. Streaming remains unauthenticated; use a trusted network. |

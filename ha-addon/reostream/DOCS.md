@@ -51,9 +51,9 @@ Frigate/go2rtc normally use 8554 for RTSP, avoiding reostream's 8561, but UDP
 8000/8001 can conflict with other media services. Check every listener before
 installing. The app's UI/config can change TCP listener/FTP addresses; UDP
 8000/8001 are fixed in this source version. Resolve their conflict in the
-other service. If changing 8560 or 8562, the metadata's watchdog/Open Web UI
-link no longer follows: disable the watchdog and open the new URL manually,
-or maintain matching metadata in a local fork. Keep defaults where possible.
+other service. If changing 8560 or 8562, the image health check/Open Web UI
+link no longer follows: update the image health check and open the new URL manually,
+or maintain matching configuration in a local fork. Keep defaults where possible.
 
 Streaming HTTP and RTSP are **unauthenticated**, as in standalone reostream.
 The management password does not protect stream URLs. Do not forward these

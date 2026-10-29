@@ -13,9 +13,10 @@ Date: 2026-10-29. Local host: Linux aarch64. Application source:
 | Static `CGO_ENABLED=0` Linux builds | Passed for amd64 and arm64; ELF architectures verified |
 | Native ARM64 process smoke test | Passed: HTTP status, RTSP OPTIONS, claim POST, 0600 config, config survives restart, management redirects to login, SIGTERM exits 0 |
 | Standalone application/streaming source and Dockerfile/compose | Unchanged |
-| Docker image builds and container volume recreation smoke | Not run locally: no Docker/Podman engine; configured in CI on native amd64 and aarch64 runners |
-| Add-on metadata schema | Passed locally against frenck/action-addon-linter main config.schema.json (Draft 7, format checks); full lint action configured in CI |
-| Race tests and standalone Docker build | Configured in CI |
+| Docker image builds and container volume recreation smoke | Temporary Docker daemon provisioned for local ARM64 build; completion pending. Native amd64 and aarch64 runners also configured in CI |
+| Add-on metadata schema and full linter | Passed locally using frenck/action-addon-linter v2 lint.py and the published schema; redundant defaults and obsolete watchdog metadata corrected |
+| Race tests | Attempted locally; ThreadSanitizer rejects this host (39-bit VMA, requires 48-bit). Native GitHub runner check remains required |
+| Standalone Docker build | Configured in CI |
 | Real HAOS, Supervisor installation/watchdog/backup/restore | Unverified, hardware required |
 | Real cameras, FTP, MQTT broker, Frigate playback/events | Unverified, hardware/services required |
 
@@ -24,9 +25,13 @@ sandbox; it was restarted with network and local sockets allowed. No claim
 of successful HAOS or Frigate end-to-end testing is made. Container smoke
 checks use an empty camera fleet, not synthetic claims of real camera media.
 
-Publishing was blocked: the GitHub connector returned HTTP 403 Resource not
-accessible by integration when creating a blob; the local gh token is invalid.
-No remote branch or pull request was created.
+Publishing initially failed through the GitHub connector (HTTP 403). A later
+git push authenticated through VS Code but GitHub rejected the new workflow
+because its OAuth token lacks workflow scope. Browser reauthentication has
+been requested. No remote branch or pull request exists yet.
+
+Home Assistant at http://192.168.69.7:8123 could not be reached from this
+environment; hardware acceptance still needs a reachable HAOS instance.
 
 Before merging, publish the branch and require every Home Assistant add-on
 workflow job to pass.

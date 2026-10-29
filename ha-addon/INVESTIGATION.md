@@ -77,5 +77,5 @@ python3 scripts/smoke_ha_addon.py reostream-addon:test
 
 Use BUILD_ARCH=aarch64 on an ARM64 machine. CI uses native runners for both
 architectures, so no QEMU assumption leaks into Supervisor installation.
-The smoke check maps loopback ports in bridge networking to isolate CI; the
-metadata selects host networking on HAOS, which needs hardware validation.
+The smoke check uses host networking, matching the package metadata, on
+isolated CI runners. Real HAOS discovery still needs hardware validation.

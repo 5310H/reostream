@@ -21,8 +21,8 @@ def docker(*args):
 
 def start():
     docker('run', '-d', '--name', name, '-v', volume + ':/data',
-           '-p', '127.0.0.1:8560:8560', '-p', '127.0.0.1:8561:8561',
-           '-p', '127.0.0.1:8562:8562', image)
+           '--network', 'host', '--health-interval=1s',
+           '--health-start-period=1s', image)
     for _ in range(60):
         try:
             with urllib.request.urlopen('http://127.0.0.1:8560/api/status', timeout=1) as r:
@@ -32,6 +32,12 @@ def start():
             time.sleep(1)
     else:
         raise AssertionError('HTTP health endpoint did not become ready')
+    for _ in range(30):
+        if docker('inspect', '-f', '{{.State.Health.Status}}', name).strip() == 'healthy':
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError('Docker health check did not become healthy')
     with socket.create_connection(('127.0.0.1', 8561), timeout=2) as s:
         s.sendall(b'OPTIONS rtsp://localhost:8561/ RTSP/1.0\r\nCSeq: 1\r\n\r\n')
         assert b'RTSP/1.0 200' in s.recv(4096)
@@ -70,7 +76,7 @@ try:
     with urllib.request.urlopen('http://127.0.0.1:8562/', timeout=3) as r:
         assert r.geturl().endswith('/login'), 'Claimed UI must require login'
     stop()
-    print('Image startup, RTSP, claim, permissions, persistence and SIGTERM: OK')
+    print('Image startup, Docker health, RTSP, claim, permissions, persistence and SIGTERM: OK')
 finally:
     subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
     subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True)

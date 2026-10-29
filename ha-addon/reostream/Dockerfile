@@ -35,4 +35,6 @@ LABEL io.hass.name="reostream" \
       org.opencontainers.image.revision="ab698dba24f218be26192d25ff1cc1fd38f59778"
 EXPOSE 8560/tcp 8561/tcp 8562/tcp 8000/udp 8001/udp 2121-2131/tcp
 WORKDIR /data/reostream
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8560/api/status || exit 1
 ENTRYPOINT ["/run.sh"]
