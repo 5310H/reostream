@@ -13,7 +13,9 @@ Date: 2026-10-29. Local host: Linux aarch64. Application source:
 | Static `CGO_ENABLED=0` Linux builds | Passed for amd64 and arm64; ELF architectures verified |
 | Native ARM64 process smoke test | Passed: HTTP status, RTSP OPTIONS, claim POST, 0600 config, config survives restart, management redirects to login, SIGTERM exits 0 |
 | Standalone application/streaming source and Dockerfile/compose | Unchanged |
-| Docker image builds and container volume recreation smoke | Temporary Docker daemon provisioned for local ARM64 build; completion pending. Native amd64 and aarch64 runners also configured in CI |
+| ARM64 add-on Docker image | Passed: built from the isolated Supervisor context with BUILD_ARCH=aarch64 using Alpine Go build stage |
+| ARM64 container smoke | Passed on host networking: HTTP, RTSP OPTIONS, Docker health, web claim, uid 65532, config mode 0600, config/clip persistence after container recreation, SIGTERM exit 0 |
+| AMD64 add-on Docker image | Not yet run; native CI runner configured |
 | Add-on metadata schema and full linter | Passed locally using frenck/action-addon-linter v2 lint.py and the published schema; redundant defaults and obsolete watchdog metadata corrected |
 | Race tests | Attempted locally; ThreadSanitizer rejects this host (39-bit VMA, requires 48-bit). Native GitHub runner check remains required |
 | Standalone Docker build | Configured in CI |
@@ -30,8 +32,9 @@ git push authenticated through VS Code but GitHub rejected the new workflow
 because its OAuth token lacks workflow scope. Browser reauthentication has
 been requested. No remote branch or pull request exists yet.
 
-Home Assistant at http://192.168.69.7:8123 could not be reached from this
-environment; hardware acceptance still needs a reachable HAOS instance.
+Home Assistant is reachable at https://192.168.69.7 (port 443). SSH port 22
+is reachable, but the available key was rejected for root. Hardware acceptance
+needs authorized SSH access or operator-run checks on that instance.
 
 Before merging, publish the branch and require every Home Assistant add-on
 workflow job to pass.

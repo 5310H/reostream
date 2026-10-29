@@ -26,6 +26,27 @@ For branch testing after pushing, add
 default-branch repositories get different Supervisor identities/storage; use
 backup/restore deliberately rather than assuming data migrates between them.
 
+# Local installation for testing before publication
+
+GitHub publication is not required for a local Supervisor install:
+
+1. Use the Samba share or Terminal & SSH add-on to access Home Assistant's
+   local add-on folder (`/addons` on older releases, `/local_apps` on releases
+   using the Apps naming). Use the actual folder exposed by your installation.
+2. Copy this complete `reostream` folder there. Its `config.yaml`, `Dockerfile`
+   and `run.sh` must be directly inside the copied folder, not one level deeper.
+3. In the add-on/app store, choose Check for updates and refresh the page.
+4. Find reostream under Local add-ons/apps, then install and start it. Follow
+   the claim-token and web-interface steps above. Internet access is still
+   required for the pinned-source build.
+5. Check startup, camera discovery, playback and the backup/restore procedure
+   before using it for regular recording.
+
+A local install has a different Supervisor identity and private storage from
+an install through the GitHub repository. Back up and migrate deliberately;
+do not assume switching repositories preserves the same data directory.
+See Home Assistant's [local app installation guide](https://contributors.home-assistant.io/apps/first-app/).
+
 # Network and security
 
 Host networking is required for the supported discovery/UDP/FTP setup. There
