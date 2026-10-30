@@ -185,4 +185,5 @@ Add `https://github.com/5310h/reostream` in the Home Assistant add-on store's
 Repositories menu, then install **reostream** (once the add-on is merged).
 Supports amd64 and aarch64, host-network camera discovery, and persistent
 Supervisor storage. See [installation, Frigate, MQTT, backup and troubleshooting](ha-addon/reostream/DOCS.md).
-Actual HAOS/camera acceptance is pending; see the validation notes there.
+AMD64 HAOS installation and backup/restore have been validated; see the
+validation notes for remaining camera and platform checks.

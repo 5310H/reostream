@@ -1,5 +1,5 @@
 name: reostream
-version: "0.1.0"
+version: "0.1.1"
 slug: reostream
 description: Reolink Baichuan streaming, camera management and detection events
 url: https://github.com/5310h/reostream/tree/main/ha-addon/reostream

@@ -48,7 +48,7 @@ records how the current package meets the Supervisor contract.
 | Repository | Root `repository.yaml`; nested `ha-addon/reostream/config.yaml` discovered by Supervisor. Publish/merge before using the default repository URL. |
 | Required metadata | `name`, quoted `version`, `slug`, `description` and supported `arch` entries are provided. |
 | Build context | Self-contained add-on directory; Dockerfile fetches and verifies an exact application commit. No parent-directory COPY or moving source branch. |
-| Architectures | `amd64` and `aarch64`; Go maps the latter to `arm64`. Both static binary builds passed; both container builds still need CI. |
+| Architectures | `amd64` and `aarch64`; Go maps the latter to `arm64`. Both native container builds and smoke checks passed CI. |
 | Runtime dependencies | Static Go application plus Alpine CA certificates, shell and su-exec. No GPU, USB device, ffmpeg or S6 requirement. |
 | Startup and shutdown | Default application startup, automatic boot and Supervisor init, foreground exec and a 30-second shutdown timeout. Existing SIGTERM handling is preserved. |
 | Health monitoring | Docker `HEALTHCHECK` on `/api/status`; enable Watchdog in the add-on UI. It does not open a stream or wake a camera. |
@@ -59,8 +59,8 @@ records how the current package meets the Supervisor contract.
 | Management UI | Normal HTTP management listener and `webui` link; existing authentication preserved. Ingress is optional and disabled pending compatibility tests. |
 | Network exposure | Host networking justified by broadcast discovery and UDP/FTP behavior. Streaming remains unauthenticated; use a trusted network. |
 | Store documentation | README, DOCS, CHANGELOG and PNG icon provided. Extra branding/translations are optional; no add-on options currently need translation. |
-| Validation | Metadata schema checks, source/version consistency, Go tests, native binary builds and native ARM64 smoke checks passed. Workflow defines full lint, standalone Docker build, both add-on image builds and container smoke checks. |
-| Release readiness | Publish branch, pass all workflow jobs, then test HAOS installation, boot, watchdog, upgrade, backup/restore and real camera integrations. These hardware checks remain unverified. |
+| Validation | Metadata schema checks, source/version consistency, Go tests/race checks, full lint, both native image builds and container smoke checks passed CI; AMD64 HAOS install/restart/backup/restore also passed. |
+| Release readiness | Branch published and PR open. See VALIDATION.md and the PR for passed checks; real camera/integration tests, physical ARM64 HAOS and full host reboot remain outstanding. |
 
 There is no Python `requirements.txt` needed by the add-on: its application
 is Go. Development validation uses PyYAML; the workflow pins its version.

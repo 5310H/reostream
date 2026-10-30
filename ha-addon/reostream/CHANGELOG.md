@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+Supervisor-validated packaging update using the same application source.
+Provides a versioned upgrade from 0.1.0 to verify persistent settings.
+Full metadata lint, both native architecture image builds, container
+persistence smoke tests, Go race tests and standalone Docker builds pass CI.
+
 ## 0.1.0
 
 Initial Supervisor package for amd64 and aarch64. Builds unchanged application

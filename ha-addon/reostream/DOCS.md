@@ -205,7 +205,7 @@ existing external-broker settings. Do not enter a `mqtts://` URL.
 CI runs Go tests, add-on metadata lint, both architecture image builds and
 container smoke checks (first-run HTTP, RTSP listener, claim/config save,
 recreation persistence, non-root UID and SIGTERM). See VALIDATION.md for the
-actual local results. Real HAOS installation/boot/watchdog/backup/restore,
-ARM64 execution on physical hardware, camera discovery/media/two-way audio,
-FTP uploads, MQTT broker delivery and Frigate playback/events remain required
-hardware acceptance tests. No successful end-to-end test is claimed.
+actual local and HAOS results. Physical ARM64 HAOS, full host reboot, camera
+media/two-way audio, camera FTP uploads, MQTT broker event delivery and Frigate
+playback/events remain hardware acceptance checks. Discovery found a candidate
+on the tested LAN. No successful camera end-to-end test is claimed.

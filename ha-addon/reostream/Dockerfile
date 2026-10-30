@@ -15,7 +15,7 @@ RUN go mod download
 RUN arch="${TARGETARCH:-$BUILD_ARCH}"; \
     case "$arch" in aarch64|arm64) arch=arm64 ;; amd64) ;; *) echo "Unsupported architecture: $arch" >&2; exit 1 ;; esac; \
     CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
-    -ldflags="-s -w -X github.com/VoltTech21/reostream/internal/control.version=ha-0.1.0-${REOSTREAM_SOURCE}" \
+    -ldflags="-s -w -X github.com/VoltTech21/reostream/internal/control.version=ha-0.1.1-${REOSTREAM_SOURCE}" \
     -o /out/reostream ./cmd/reostream
 
 FROM alpine:3.22.3
@@ -31,7 +31,7 @@ LABEL io.hass.name="reostream" \
       io.hass.description="Reolink Baichuan streaming and camera management" \
       io.hass.type="addon" \
       io.hass.arch="${BUILD_ARCH}" \
-      io.hass.version="0.1.0" \
+      io.hass.version="0.1.1" \
       org.opencontainers.image.source="https://github.com/5310h/reostream" \
       org.opencontainers.image.revision="ab698dba24f218be26192d25ff1cc1fd38f59778"
 EXPOSE 8560/tcp 8561/tcp 8562/tcp 8000/udp 8001/udp 2121-2131/tcp
