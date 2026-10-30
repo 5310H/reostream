@@ -178,3 +178,12 @@ AGPL v3. Free to use, run and modify. If you distribute a modified version or ru
 service for others, you must publish your changes.
 
 A commercial license without that obligation is available. See `COPYRIGHT`.
+
+## Home Assistant OS add-on
+
+Add `https://github.com/5310h/reostream` in the Home Assistant add-on store's
+Repositories menu, then install **reostream** (once the add-on is merged).
+Supports amd64 and aarch64, host-network camera discovery, and persistent
+Supervisor storage. See [installation, Frigate, MQTT, backup and troubleshooting](ha-addon/reostream/DOCS.md).
+AMD64 HAOS installation and backup/restore have been validated; see the
+validation notes for remaining camera and platform checks.

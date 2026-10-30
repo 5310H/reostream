@@ -1,0 +1,13 @@
+name: reostream
+version: "0.1.1"
+slug: reostream
+description: Reolink Baichuan streaming, camera management and detection events
+url: https://github.com/5310h/reostream/tree/main/ha-addon/reostream
+arch:
+  - amd64
+  - aarch64
+stage: experimental
+timeout: 30
+backup: cold
+host_network: true
+webui: "http://[HOST]:[PORT:8562]"
