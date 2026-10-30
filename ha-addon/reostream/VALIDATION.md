@@ -16,9 +16,10 @@ Date: 2026-10-29. Application source:
 | Actual HAOS installation | Passed on generic-x86-64, HAOS 18.2, Supervisor 2026.10.5, Core 2026.10.4, Docker 29.6.2 |
 | Actual Supervisor startup and confinement | HTTP management and RTSP OPTIONS passed; boot auto, watchdog enabled, Protection mode on, default AppArmor and host networking |
 | Actual Supervisor restart persistence | Passed: generated management password, authenticated configuration and marker preserved |
-| Actual Supervisor cold backup and partial restore | Restored marker and authentication passed with only the test add-on selected; subsequent editing exposed an unwritable config backup. Version 0.1.1 repairs private file ownership; post-fix acceptance is tracked in the PR |
+| Actual Supervisor cold backup and partial restore | Passed on 0.1.1, including edits after restore. A 0.1.0 restore exposed an unwritable config backup; the 0.1.1 ownership repair fixes it. Home Assistant and all other apps excluded |
 | Actual LAN camera discovery | Scan completed and found one candidate; credentials/actual camera media not yet tested |
-| Actual watchdog failure recovery and 0.1.0 to 0.1.1 upgrade | Acceptance results tracked in the linked PR below |
+| Actual watchdog failure recovery | Passed: deliberately failed only the test add-on health check, observed Supervisor restart it automatically, restored the normal listener and verified saved settings |
+| Actual Supervisor version upgrade | Passed: 0.1.0 to 0.1.1 preserved the generated management password and configuration fingerprint |
 | Physical ARM64 HAOS and full host reboot | Not performed; ARM64 Linux container execution is tested |
 | Camera video/audio, camera FTP uploads, broker event delivery and Frigate playback/events | Still require actual camera credentials and integration configuration; no successful end-to-end claim |
 
@@ -26,8 +27,11 @@ The first CI run with all jobs passing is
 [Home Assistant add-on run 40974956020](https://github.com/5310H/reostream/actions/runs/40974956020)
 for implementation commit `a1b084aa80a2d8d671e500f8692089226d2f4249`.
 The [pull request acceptance record](https://github.com/5310H/reostream/pull/1)
-tracks subsequent versioned-upgrade and hardware results. Require all checks
-on the latest implementation before merging.
+tracks subsequent checks, including the restore regression and hardware results.
+The [ownership-regression CI run](https://github.com/5310H/reostream/actions/runs/40981432154)
+passed all jobs for implementation commit
+`ec1979c737e64411fb76b4dae5b32f510c5f5e6a`. Require all checks on the latest
+implementation before merging.
 
 The HAOS test uses a separate feature-branch repository identity and temporary
 test configuration. It does not overwrite existing standalone data or other
