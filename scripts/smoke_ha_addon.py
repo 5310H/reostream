@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Exercise the actual image without cameras; no credential/log dumps on failure."""
 import hashlib
+import html
+import http.cookiejar
 import re
 import socket
 import subprocess
@@ -60,7 +62,8 @@ try:
     token = re.search(rb'\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b', logs.stdout + logs.stderr)[0].decode()
     with urllib.request.urlopen('http://127.0.0.1:8562/claim', timeout=3) as r:
         assert r.status == 200
-    form = urllib.parse.urlencode({'token': token, 'password': uuid.uuid4().hex}).encode()
+    password = uuid.uuid4().hex
+    form = urllib.parse.urlencode({'token': token, 'password': password}).encode()
     with urllib.request.urlopen('http://127.0.0.1:8562/claim', data=form, timeout=5) as r:
         assert r.status == 200  # follows redirect to login
     path = '/data/reostream/config.toml'
@@ -68,6 +71,14 @@ try:
     assert docker('exec', name, 'stat', '-c', '%a:%u', path).strip() == '600:65532'
     docker('exec', '-u', '65532:65532', name, 'sh', '-c',
            'mkdir -p /data/reostream/clips; echo retained > /data/reostream/clips/smoke')
+    # Reproduce ownership left by a Supervisor restore, including a symlink
+    # to a Supervisor-owned file outside our private application tree.
+    docker('exec', name, 'sh', '-c',
+           'cp /data/reostream/config.toml /data/reostream/config.toml.bak; '
+           'chown 0:0 /data/reostream/config.toml.bak /data/reostream/clips/smoke; '
+           'chmod 600 /data/reostream/config.toml.bak; '
+           'echo {} > /data/options.json; chmod 600 /data/options.json; '
+           'ln -s /data/options.json /data/reostream/restore-link')
     stop()
     start()
     after = hashlib.sha256(docker('exec', name, 'cat', path).encode()).digest()
@@ -75,8 +86,21 @@ try:
     assert docker('exec', name, 'cat', '/data/reostream/clips/smoke').strip() == 'retained'
     with urllib.request.urlopen('http://127.0.0.1:8562/', timeout=3) as r:
         assert r.geturl().endswith('/login'), 'Claimed UI must require login'
+    assert docker('exec', name, 'stat', '-c', '%u:%g', '/data/reostream/config.toml.bak').strip() == '65532:65532'
+    assert docker('exec', name, 'stat', '-c', '%u:%g', '/data/reostream/clips/smoke').strip() == '65532:65532'
+    assert docker('exec', name, 'stat', '-c', '%u:%g', '/data/options.json').strip() == '0:0', 'Ownership repair followed a symlink outside the private directory'
+    client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    with client.open('http://127.0.0.1:8562/login', data=urllib.parse.urlencode({'password': password}).encode(), timeout=5) as r:
+        assert not r.geturl().endswith('/login')
+    with client.open('http://127.0.0.1:8562/config', timeout=5) as r:
+        page = r.read().decode()
+    config = html.unescape(re.search(r'<textarea\b[^>]*name="toml"[^>]*>(.*?)</textarea>', page, re.S)[1])
+    edited = config + '\n# Save after ownership repair\n'
+    with client.open('http://127.0.0.1:8562/config', data=urllib.parse.urlencode({'toml': edited}).encode(), timeout=5) as r:
+        assert r.status == 200
+    assert docker('exec', name, 'cat', path) == edited, 'Restored config backup prevented subsequent edits'
     stop()
-    print('Image startup, Docker health, RTSP, claim, permissions, persistence and SIGTERM: OK')
+    print('Image startup, Docker health, RTSP, claim, permissions, persistence, restored ownership and SIGTERM: OK')
 finally:
     subprocess.run(['docker', 'rm', '-f', name], capture_output=True)
     subprocess.run(['docker', 'volume', 'rm', volume], capture_output=True)

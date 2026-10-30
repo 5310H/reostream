@@ -89,7 +89,10 @@ to the normal management URL is optional.
 # Storage, backups and updates
 
 The daemon runs as uid/gid 65532. Startup creates `/data/reostream` with mode
-0700 and drops root before running Go. The existing config writer creates
+0700, repairs differing file ownership only within that private tree, and
+drops root before running Go. This permits edits after Supervisor restores
+that change ownership of backup files. The repair does not follow symlinks or
+change `/data/options.json`; existing file modes are preserved. The existing config writer creates
 `/data/reostream/config.toml` and backups with mode 0600. All camera logins,
 management password, MQTT settings and stream definitions remain in this file;
 configure them in the original UI, not the add-on options form.

@@ -16,7 +16,7 @@ Date: 2026-10-29. Application source:
 | Actual HAOS installation | Passed on generic-x86-64, HAOS 18.2, Supervisor 2026.10.5, Core 2026.10.4, Docker 29.6.2 |
 | Actual Supervisor startup and confinement | HTTP management and RTSP OPTIONS passed; boot auto, watchdog enabled, Protection mode on, default AppArmor and host networking |
 | Actual Supervisor restart persistence | Passed: generated management password, authenticated configuration and marker preserved |
-| Actual Supervisor cold backup and partial restore | Passed: backed up only the test add-on, changed a marker, restored the original marker and authenticated settings. Home Assistant and all other apps excluded |
+| Actual Supervisor cold backup and partial restore | Restored marker and authentication passed with only the test add-on selected; subsequent editing exposed an unwritable config backup. Version 0.1.1 repairs private file ownership; post-fix acceptance is tracked in the PR |
 | Actual LAN camera discovery | Scan completed and found one candidate; credentials/actual camera media not yet tested |
 | Actual watchdog failure recovery and 0.1.0 to 0.1.1 upgrade | Acceptance results tracked in the linked PR below |
 | Physical ARM64 HAOS and full host reboot | Not performed; ARM64 Linux container execution is tested |
